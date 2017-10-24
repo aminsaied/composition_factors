@@ -15,8 +15,8 @@ This file implements:
 
 Examples:
     sage: cf = CompositionFactors(6)
-    sage: lambda_ = [4,2]
-    sage: mu = [1,1,1]
+    sage: lambda_ = Partition([4,2])
+    sage: mu = Partition([1,1,1])
     sage: cf[lambda_][mu]
     2
 
@@ -1507,3 +1507,116 @@ class _SizeIndexPair(tuple):
     def __str__(self):
         """Overwrite __str__ method for tuple."""
         return "Pair(size={}, id={})".format(self.size, self.id)
+
+
+class Visualisations(object):
+    """Provides data visualisation for composition factors.
+
+    We generate a lot of data in :class:`CompositionFactors`. Here we provide
+    tools to help find and analyse patters in the data.
+
+    Example:
+        sage: cf = CompositionFactors(10)
+        sage: vis = Visualisations(cf)
+        sage: vis.PD_stability()
+
+    This returns a matplotlib visualisation of the coefficients stabalising in
+    PD-direction. Concretely, we take two partitions ``lambda`` and ``mu``,
+    and successively compute the coefficients adding one box to the top row of
+    each partition as we go. We produce a plot displaying how the coefficients
+    grow.
+    """
+
+    def __init__(self, cf):
+        """Initialise ``self`` with a :class:`CompositionFactors` instance.
+
+        Args:
+            cf (:class:`CompositionFactors`): Computed composition factors.
+        """
+        self.cf = cf
+
+    def PD_stability(self, filename, resolution=np.inf, seq_length=2, width=20):
+        """We investigate adding one box to the top row of each partition.
+
+        Plots a graph of how the coefficients change when adding one box to
+        the top row of each partition ``lambda_`` and ``mu``.
+
+        Args:
+            resolution (int): (default: ``np.inf``) Cut off any values above
+                this threshold.
+            seq_length (int): (default: 2) Only display sequences of length at
+                least ``seq_length``.
+            width (int): The width of the figure to output.
+
+        Returns:
+            A matplotlib plot of the growing coefficients.
+        """
+
+        fig = plt.figure(figsize=(width, width))
+
+        max_ = self.cf.top_degree
+
+        for i in range(1, max_+1):
+
+            for lambda_ in Partitions(i):
+                for mu in [p for i in range(1,i+1) for p in Partitions(i)]:
+
+                    if cf.coeff(lambda_, mu) >= 1:
+                        sizes, data = self._push_forward(lambda_, mu)
+
+                        if len(data) > seq_length:
+                            if max(data) <= resolution:
+                                plt.plot(sizes, data, 'o-')
+
+        plt.xlabel("Size of lambda partition")
+        plt.ylabel('Coefficient')
+
+        plt.xticks(range(2*max_))
+
+        plt.savefig(filename)
+
+        plt.show()
+
+
+    def _push_forward(self, lambda_, mu):
+        """Computes list of coefficients in the PD-stable direction.
+
+        Uses ``self.cf`` to compute the coefficints of ``lambda`` and ``mu``,
+        adding a box to the top row of each
+
+        Args:
+            lambda_ (partition): Base outer partition for the stability check.
+            mu (partition): Base inner partition for the stability check.
+
+        Returns:
+            List of sizes of lambda_ partitions and list their coefficients.
+        """
+        max_  = self.cf.top_degree
+        size = sum(lambda_) + sum(mu)
+
+        sizes, data = [], []
+        while sum(lambda_) < max_:
+            c = self.cf.coeff(lambda_, mu)
+
+            data.append(c)
+            sizes.append(size)
+
+            size += 1
+            lambda_ = self._add_one(lambda_)
+            mu = self._add_one(mu)
+
+        return sizes, data
+
+    @staticmethod
+    def _add_one(p):
+        """Add a box to the top row of the partition.
+
+        Args:
+            p (partitions): The partition to which a box is added.
+
+        Returns:
+            A partition with one box added to the top row.
+        """
+        p_as_list = p.to_list()
+        p_as_list[0] += 1
+        return Partition(p_as_list)
