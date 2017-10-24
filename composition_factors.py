@@ -5,7 +5,7 @@ Computes the composition factors of the n-th tensor power of the free
 associative algebra in terms of coefficients `c_{\lambda\mu}` indexing the
 terms in the irreducible decomposition.
 
-This file impliments:
+This file implements:
 
     - A fast algorithm computing the coefficients `c_{\lambda\mu}`.
 
@@ -120,6 +120,8 @@ class CompositionFactors(object):
     def __init__(self, top_degree, _coeffs=None, _matrix=None):
         """Initialise ``self``.
 
+        Computes the coefficients for all degree up to ``top_degree``.
+
         Args:
             top_degree (int): The top degree of symmetric functions computed.
         """
@@ -213,11 +215,16 @@ class CompositionFactors(object):
 
         mask = self.matrix.copy()
         mask[np.where(mask>resolution)] = resolution
+        mask[np.where(mask==0)] = None
 
         fig = plt.figure(figsize=(width, width))
 
+        # cmap = plt.cm.jet
+        cmap = plt.cm.Paired
+        cmap.set_bad('white',1.)
+
         ax = fig.add_subplot(111)
-        im = ax.imshow(mask, interpolation='none')
+        im = ax.imshow(mask, interpolation='none', cmap=cmap)
         plt.colorbar(im)
 
         n = len(cf.coeffs)
@@ -334,7 +341,7 @@ class CompositionFactorsAtDegree(object):
                     yield shape, mu
 
     def _compute(self):
-        """Impliments the algorithm computing composition factors."""
+        """Implements the algorithm computing composition factors."""
         for shape, mu in self.shape_mu_pairs():
 
             if shape in self.lookup:
@@ -353,7 +360,7 @@ class CompositionFactorsAtDegree(object):
 
 
 class MuPartition(object):
-    """Impliments decomposition and calculates iterated Littlewood-Richardson.
+    """Implements decomposition and calculates iterated Littlewood-Richardson.
 
     Computes decompositions of a partition. A decomposition of a partition mu
     is a set of partitions whose sizes sum to the size of mu. Such a
@@ -927,7 +934,7 @@ class InstructionManual(object):
     the :meth:`assemble` method computes the associated Schur polynomial.
 
     The workhorse of the class is the :meth:`_build_instructions` method that
-    impliments an efficient recursive algorithm computing instructions.
+    implements an efficient recursive algorithm computing instructions.
 
     Attributes:
         shape (partition): The partition associated to a decomposition.
@@ -1075,7 +1082,7 @@ class InstructionManual(object):
     def build(self):
         """Recursively construct instructions of the given shape and target.
 
-        Wrapper for :meth:`_build_instructions` method which impliments the
+        Wrapper for :meth:`_build_instructions` method which implements the
         recursive algorithm computing all possible ways to assemble Schur
         polynomials of the target degree.
         """
