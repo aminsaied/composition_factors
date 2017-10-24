@@ -31,4 +31,4 @@ sage: cf = CompositionFactors(7)
 sage: cf.display()
 ~~~~
 
-[[https://github.com/aminsaied/composition_factors/img/cf_7_example.png|alt=Composition factors of degree 7]]
+[[https://github.com/aminsaied/composition_factors/blob/master/img/cf_7_example.png|alt=Composition factors of degree 7]]
