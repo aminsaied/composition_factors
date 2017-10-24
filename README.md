@@ -31,4 +31,4 @@ sage: cf = CompositionFactors(7)
 sage: cf.display()
 ~~~~
 
-[[https://github.com/aminsaied/composition_factors/blob/master/img/cf_7_example.png]]
+![Composition Factors of degree at most 7](/img/cf_7_example.png)
