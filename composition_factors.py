@@ -9,7 +9,7 @@ This file implements:
 
     - A fast algorithm computing the coefficients `c_{\lambda\mu}`.
 
-    - A data-structure capturing the representation theory free Lie algebra.
+    - A data-structure representing the free Lie algebra `\mathcal{L}(V)`.
 
     - Visualisations of the composition factors.
 
@@ -209,8 +209,8 @@ class CompositionFactors(object):
             width (int): (default 20) The width to display the figure.
 
         Returns:
-            A ``plt.imshow()`` of :attr:`matrix`, (possibly) with values
-                capped at ``resolution``.
+            A figure displaying :attr:`matrix`, (possibly) with values capped
+                at ``resolution``.
         """
 
         mask = self.matrix.copy()
@@ -241,7 +241,7 @@ class CompositionFactors(object):
         ax.xaxis.set_label_position('top')
         ax.set_ylabel("Lambda")
 
-        plt.show()
+        return fig
 
     def _compute(self, top_degree):
         """Compute coefficients up to ``top_degree``."""
@@ -1535,7 +1535,7 @@ class Visualisations(object):
         """
         self.cf = cf
 
-    def PD_stability(self, filename, resolution=np.inf, seq_length=2, width=20):
+    def PD_stability(self, resolution=np.inf, seq_length=2, width=20):
         """We investigate adding one box to the top row of each partition.
 
         Plots a graph of how the coefficients change when adding one box to
@@ -1549,7 +1549,7 @@ class Visualisations(object):
             width (int): The width of the figure to output.
 
         Returns:
-            A matplotlib plot of the growing coefficients.
+            A matplotlib figure plotting of the growing coefficients.
         """
 
         fig = plt.figure(figsize=(width, width))
@@ -1570,12 +1570,9 @@ class Visualisations(object):
 
         plt.xlabel("Size of lambda partition")
         plt.ylabel('Coefficient')
-
         plt.xticks(range(2*max_))
 
-        plt.savefig(filename)
-
-        plt.show()
+        return fig
 
 
     def _push_forward(self, lambda_, mu):
