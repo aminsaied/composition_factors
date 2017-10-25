@@ -1568,7 +1568,7 @@ class Visualisations(object):
                             if max(data) <= resolution:
                                 plt.plot(sizes, data, 'o-')
 
-        plt.xlabel("Size of lambda partition")
+        plt.xlabel("Sum of sizes of lambda and mu partition")
         plt.ylabel('Coefficient')
         plt.xticks(range(2*max_))
 
@@ -1598,7 +1598,7 @@ class Visualisations(object):
             data.append(c)
             sizes.append(size)
 
-            size += 1
+            size += 2
             lambda_ = self._add_one(lambda_)
             mu = self._add_one(mu)
 
