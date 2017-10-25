@@ -36,9 +36,9 @@ sage: cf.display()
 We also provide a `Visualisations` class to investigate new stability phenomena. Here we investigate PD-module stability among the coefficients. Concretely, this is the stability that occurs when you add one box to the first row in each partition `lambda_` and `mu`. The method `PD_stability` plots how the coefficients evolve under this stability.
 
 ~~~~
-sage: cf = CompositionFactors(9)
+sage: cf = CompositionFactors(10)
 sage: vis = Visualisations(cf)
 sage: vis.PD_stability()
 ~~~~
 
-<img src="/img/PD_stability_cf_degree_9.png" width="750">
+<img src="/img/PD_stability_cf_degree_10.png" width="750">
