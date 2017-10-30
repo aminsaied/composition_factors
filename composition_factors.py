@@ -146,28 +146,6 @@ class CompositionFactors(object):
         """
         return self.coeffs[key]
 
-    def coeff(self, lambda_, mu):
-        """Look-up the coefficient of lambda_ and mu.
-
-        Args:
-            lambda_ (Partition): The lambda-partition.
-            mu (Partition): The mu-partition.
-
-        Example:
-            sage: cf = CompositionFactors(5)
-            sage: lambda_ = Partition([3,1])
-            sage: mu = Partition([1,1])
-            sage: cf.coeff(lambda_, mu)
-            1
-        """
-        lambda_ = Partition(lambda_)
-        mu = Partition(mu)
-
-        assert sum(lambda_) <= self.top_degree
-        assert sum(mu) <= self.top_degree
-
-        return self.coeffs[lambda_][mu]
-
     def save(self, filename):
         """Save composition factors to file.
 
@@ -194,54 +172,27 @@ class CompositionFactors(object):
         load_coeffs = load(filename)
         return cls(*load_coeffs)
 
-    def display(self, resolution=np.inf, width=20):
-        """Displays an array representing :attr:`matrix`.
-
-        When considered as an array of integers, the data can be visualised as
-        with ``plt.imshow``. For large degrees, the coefficients can get very
-        large, skewing potentially interesting lower degree information.
-        Coefficients are capped at ``resolution`` to bring out these lower
-        dimensional features.
+    def coeff(self, lambda_, mu):
+        """Look-up the coefficient of lambda_ and mu.
 
         Args:
-            resolution (int): (default ``np.inf``) To cap the coefficients
-                appearing in :attr:`matrix`.
-            width (int): (default 20) The width to display the figure.
+            lambda_ (Partition): The lambda-partition.
+            mu (Partition): The mu-partition.
 
-        Returns:
-            A figure displaying :attr:`matrix`, (possibly) with values capped
-                at ``resolution``.
+        Example:
+            sage: cf = CompositionFactors(5)
+            sage: lambda_ = Partition([3,1])
+            sage: mu = Partition([1,1])
+            sage: cf.coeff(lambda_, mu)
+            1
         """
+        lambda_ = Partition(lambda_)
+        mu = Partition(mu)
 
-        mask = self.matrix.copy()
-        mask[np.where(mask>resolution)] = resolution
-        mask[np.where(mask==0)] = None
+        assert sum(lambda_) <= self.top_degree
+        assert sum(mu) <= self.top_degree
 
-        fig = plt.figure(figsize=(width, width))
-
-        # cmap = plt.cm.jet
-        cmap = plt.cm.Paired
-        cmap.set_bad('white',1.)
-
-        ax = fig.add_subplot(111)
-        im = ax.imshow(mask, interpolation='none', cmap=cmap)
-        plt.colorbar(im)
-
-        n = len(cf.coeffs)
-        parts = [p for __, p in cf._partitions()]
-
-        plt.xticks(range(n), parts, rotation='vertical')
-        plt.yticks(range(n), parts)
-
-        ax.tick_params(labelbottom='off',
-                       labeltop='on',
-                       labelleft="on")
-
-        ax.set_xlabel("Mu")
-        ax.xaxis.set_label_position('top')
-        ax.set_ylabel("Lambda")
-
-        return fig
+        return self.coeffs[lambda_][mu]
 
     def _compute(self, top_degree):
         """Compute coefficients up to ``top_degree``."""
@@ -273,6 +224,20 @@ class CompositionFactors(object):
         all_parts = [part for i in range(1, self.top_degree+1) for part in Partitions(i)]
         for index, part in enumerate(all_parts):
             yield index, part
+
+    def display(self, resolution=np.inf, width=20, ticks=True):
+        """Displays a representation of :attr:`matrix`.
+
+        Uses the :class:`Visualisations` to display an image of `self.matrix`.
+
+        When considered as an array of integers, the data can be visualised as
+        with ``plt.imshow``. For large degrees, the coefficients can get very
+        large, skewing potentially interesting lower degree information.
+        Coefficients are capped at ``resolution`` to bring out these lower
+        dimensional features.
+        """
+        vis = Visualisations(self)
+        return vis.display(resolution, width, ticks)
 
 
 class CompositionFactorsAtDegree(object):
@@ -1515,6 +1480,18 @@ class Visualisations(object):
     We generate a lot of data in :class:`CompositionFactors`. Here we provide
     tools to help find and analyse patters in the data.
 
+    The most general visualisation we provide is in the :meth:`display`, which
+    returns a visual representation of the full matrix of coefficients stored
+    in a :class:`CompositionFactors` object.
+
+    Example:
+        sage: cf = CompositionFactors(10)
+        sage: vis = Visualisations(cf)
+        sage: figure = vis.display()
+        sage: figure.savefig("cf_degree_10.png")
+
+    We explore stability phenomina in the category FI and the category PD.
+
     Example:
         sage: cf = CompositionFactors(10)
         sage: vis = Visualisations(cf)
@@ -1535,11 +1512,62 @@ class Visualisations(object):
         """
         self.cf = cf
 
+    def display(self, resolution=np.inf, width=20, ticks=True):
+        """Displays an array representing :attr:`matrix`.
+
+        When considered as an array of integers, the data can be visualised as
+        with ``plt.imshow``. For large degrees, the coefficients can get very
+        large, skewing potentially interesting lower degree information.
+        Coefficients are capped at ``resolution`` to bring out these lower
+        dimensional features.
+
+        Args:
+            resolution (int): (default ``np.inf``) Caps the coefficients
+                appearing in :attr:`matrix`.
+            width (int): (default `20`) The width to display the figure.
+            ticks (bool): (default `True`) Whether to set axis ticks.
+
+        Returns:
+            A figure displaying :attr:`matrix`, (possibly) with values capped
+                at ``resolution``.
+        """
+
+        mask = self.cf.matrix.copy()
+        mask[np.where(mask>resolution)] = resolution
+        mask[np.where(mask==0)] = None
+
+        fig = plt.figure(figsize=(width, width))
+
+        cmap = plt.cm.Paired
+        cmap.set_bad('white',1.)
+
+        ax = fig.add_subplot(111)
+        im = ax.imshow(mask, interpolation='none', cmap=cmap)
+        plt.colorbar(im)
+
+        n = len(cf.coeffs)
+        parts = [p for __, p in cf._partitions()]
+
+        if ticks:
+            plt.xticks(range(n), parts, rotation='vertical')
+            plt.yticks(range(n), parts)
+
+        ax.tick_params(labelbottom='off',
+                       labeltop='on',
+                       labelleft="on")
+
+        ax.set_xlabel("Mu")
+        ax.xaxis.set_label_position('top')
+        ax.set_ylabel("Lambda")
+
+        return fig
+
     def PD_stability(self, resolution=np.inf, seq_length=2, width=20):
         """We investigate adding one box to the top row of each partition.
 
         Plots a graph of how the coefficients change when adding one box to
-        the top row of each partition ``lambda_`` and ``mu``.
+        the top row of each partition ``lambda_`` and ``mu``. This is
+        stability in the PD-direction.
 
         Args:
             resolution (int): (default: ``np.inf``) Cut off any values above
@@ -1559,10 +1587,10 @@ class Visualisations(object):
         for i in range(1, max_+1):
 
             for lambda_ in Partitions(i):
-                for mu in [p for i in range(1,i+1) for p in Partitions(i)]:
+                for mu in [p for i in range(1, i+1) for p in Partitions(i)]:
 
                     if cf.coeff(lambda_, mu) >= 1:
-                        sizes, data = self._push_forward(lambda_, mu)
+                        sizes, data = self._push_diagonal(lambda_, mu)
 
                         if len(data) > seq_length:
                             if max(data) <= resolution:
@@ -1574,8 +1602,7 @@ class Visualisations(object):
 
         return fig
 
-
-    def _push_forward(self, lambda_, mu):
+    def _push_diagonal(self, lambda_, mu):
         """Computes list of coefficients in the PD-stable direction.
 
         Uses ``self.cf`` to compute the coefficints of ``lambda`` and ``mu``,
@@ -1601,6 +1628,74 @@ class Visualisations(object):
             size += 2
             lambda_ = self._add_one(lambda_)
             mu = self._add_one(mu)
+
+        return sizes, data
+
+    def FI_stability(self, resolution=np.inf, seq_length=2, width=20):
+        """We investigate adding one box to the top row of the lambdas.
+
+        Plots a graph of how the coefficients change when adding one box to
+        the top row of the partition ``lambda_``. This is stability in the
+        FI-direction.
+
+        Args:
+            resolution (int): (default: ``np.inf``) Cut off any values above
+                this threshold.
+            seq_length (int): (default: 2) Only display sequences of length at
+                least ``seq_length``.
+            width (int): The width of the figure to output.
+
+        Returns:
+            A matplotlib figure plotting of the changing coefficients.
+        """
+
+        fig = plt.figure(figsize=(width, width))
+
+        max_ = self.cf.top_degree
+
+        for i in range(1, max_+1):
+
+            for lambda_ in Partitions(i):
+                for mu in [p for i in range(1, i+1) for p in Partitions(i)]:
+
+                    if cf.coeff(lambda_, mu) >= 1:
+                        sizes, data = self._push_down(lambda_, mu)
+
+                        if len(data) > seq_length:
+                            if max(data) <= resolution:
+                                plt.plot(sizes, data, 'o-')
+
+        plt.xlabel("Sizes of lambda partition")
+        plt.ylabel('Coefficient')
+        plt.xticks(range(2*max_))
+
+        return fig
+
+    def _push_down(self, lambda_, mu):
+        """Computes list of coefficients in the PD-stable direction.
+
+        Uses ``self.cf`` to compute the coefficints of ``lambda`` and ``mu``,
+        adding a box to the top row of each
+
+        Args:
+            lambda_ (partition): Base outer partition for the stability check.
+            mu (partition): Base inner partition for the stability check.
+
+        Returns:
+            List of sizes of lambda_ partitions and list their coefficients.
+        """
+        max_  = self.cf.top_degree
+        size = sum(lambda_) + sum(mu)
+
+        sizes, data = [], []
+        while sum(lambda_) < max_:
+            c = self.cf.coeff(lambda_, mu)
+
+            data.append(c)
+            sizes.append(size)
+
+            size += 1
+            lambda_ = self._add_one(lambda_)
 
         return sizes, data
 
