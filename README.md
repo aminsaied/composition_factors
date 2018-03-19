@@ -10,6 +10,8 @@ This file implements:
 - A data-structure `Lie` capturing the representation theory of the free Lie algebra.
 - Visualisations of the composition factors and certain stability phenomena.
 
+There is a [white paper](https://arxiv.org/abs/1711.04326) describing this algorithm on the arXiv.
+
 ## Examples
 
 Compute all coefficients for partitions of size up `n` with `cf = CompositionFactors(n)`.  
