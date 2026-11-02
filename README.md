@@ -123,6 +123,52 @@ with plethysm caching. These are single-run timings excluding imports, plots,
 and the independent comparison, not a general performance guarantee. Checks
 through degree 10 do not establish correctness in arbitrary degree.
 
+## Larger CPU runs
+
+Run larger computations without plotting first, and save the exact coefficients
+before doing additional analysis. In the activated environment on Linux, this
+example limits the whole command to ten minutes, the Python process's virtual
+address space to 12 GiB, and BLAS/OpenMP to one thread:
+
+```sh
+timeout --signal=TERM --kill-after=20s 600 \
+  env MPLBACKEND=Agg OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python -u - <<'PY'
+import resource
+from time import perf_counter
+
+resource.setrlimit(resource.RLIMIT_AS, (12 * 1024**3, 12 * 1024**3))
+
+from composition_factors import CompositionFactors
+
+degree = 12
+print(f"Computing through degree {degree}...", flush=True)
+start = perf_counter()
+cf = CompositionFactors(degree)
+seconds = perf_counter() - start
+cf.save(f"composition_factors_{degree}")
+print(f"Computed in {seconds:.1f} seconds; matrix shape: {cf.matrix.shape}")
+print(f"Peak RSS: {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024:.1f} MiB")
+PY
+```
+
+The `resource` limit is an address-space ceiling, not a reservation of RAM.
+Each invocation computes all degrees up to the requested degree from scratch.
+If the timeout interrupts computation before `save`, no result for that run
+is saved; previously saved files remain available. Reload a completed result
+to plot it without repeating the computation.
+
+On the same two-CPU devbox and pinned environment, degree 12 completed in
+60.6 seconds: 271 partitions, 43,044 stored coefficients, and 17,016 nonzero
+coefficients. Peak process RSS, including save/load and comparisons, was
+413 MiB. All 11,313 stored coefficients through degree 10 were unchanged.
+A separate direct-plethysm comparison matched 2,981 pairs: every lambda row
+against the 11 mu-partitions of sizes 1 through 4. This is a partial independent
+check of degree 12, unlike the complete matrix comparison through degree 10.
+
+A degree-14 attempt reached the ten-minute wall-time limit without a completed
+result. It was stopped by the configured timeout, with no reported out-of-memory
+event. This does not establish that degree 14 cannot finish with more time.
+
 ## Regression checks
 
 The regression suite covers the documented coefficient, degree-three matrix
