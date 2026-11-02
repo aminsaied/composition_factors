@@ -1,0 +1,9 @@
+name: composition-factors
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  - sage=10.9
+  - numpy
+  - matplotlib-base

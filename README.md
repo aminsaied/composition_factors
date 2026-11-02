@@ -12,6 +12,40 @@ This file implements:
 
 There is a [white paper](https://arxiv.org/abs/1711.04326) describing this algorithm on the arXiv.
 
+## Installation
+
+This is **SageMath code**, not a standalone NumPy program. It uses Sage's
+partitions, symmetric functions, exact rational arithmetic, and Littlewood-
+Richardson coefficients. Run it with Sage's Python, not an unrelated system
+Python interpreter.
+
+With [Miniforge](https://github.com/conda-forge/miniforge) installed:
+
+```sh
+conda env create -f environment.yml
+conda activate composition-factors
+sage --version
+python -c 'from composition_factors import CompositionFactors; print(CompositionFactors(6).coeff([4, 2], [1, 1, 1]))'
+```
+
+The final command prints `2`. The environment pins SageMath 10.9 and Python
+3.12; run these commands from the repository root with the environment
+activated. SageMath 10.9's Conda entry point does not accept the older
+`sage -python` option; use the environment's `python` directly.
+
+For the exact Linux x86_64 package set used for the CPU computations below,
+replace the environment creation command with:
+
+```sh
+conda create -n composition-factors --file conda-linux-64.lock
+```
+
+For an interactive session, start `sage` and import the classes explicitly:
+
+```python
+from composition_factors import CompositionFactors, Lie, Visualisations
+```
+
 ## Examples
 
 Compute all coefficients for partitions of size up `n` with `cf = CompositionFactors(n)`.  
@@ -44,3 +78,57 @@ sage: vis.PD_stability()
 ~~~~
 
 <img src="/img/PD_stability_cf_degree_10.png" width="750">
+
+## Headless computations and saved results
+
+On a CPU server without a display, select Matplotlib's noninteractive backend:
+
+```sh
+MPLBACKEND=Agg python - <<'PY'
+from composition_factors import CompositionFactors, Visualisations
+
+cf = CompositionFactors(6)
+print(cf.coeff([4, 2], [1, 1, 1]))
+cf.save("composition_factors_6")
+cf.display(width=10).savefig("composition_factors_6.png", dpi=150)
+Visualisations(cf).PD_stability(width=10).savefig("pd_stability_6.png", dpi=150)
+PY
+```
+
+Reload with `CompositionFactors.load("composition_factors_6")`. Sage's `.sobj`
+files use pickle: only load files from a trusted source. The nested `coeffs`
+dictionary contains exact coefficients; the NumPy `matrix` is a floating-point
+view intended for visualisation, not exact large-integer arithmetic.
+
+Stability plots include the highest computed degree. `seq_length` is an
+inclusive minimum; FI plots use the size of the lambda-partition, and PD plots
+use the sum of the two partition sizes.
+
+Start with degree 6 before attempting larger computations: the number of
+partitions, decompositions, and assembly instructions grows rapidly. No GPU is
+required. Repeated Schur plethysms are cached within each degree's Lie instance;
+the cache is released with that computation rather than retained globally.
+
+### Verified CPU example
+
+With SageMath 10.9 and Python 3.12.16, computation through degree 10 gives
+138 partitions and 11,313 stored coefficients, of which 4,668 are nonzero.
+All 19,044 pairs in the full matrix agree with a separate truncated power-sum
+plethysm calculation. The documented coefficients `2` and `84` are reproduced,
+and saving, reloading, and all three headless plots work.
+
+On the same two-CPU Linux devbox, a fresh-process `CompositionFactors(10)`
+computation took 36.2 seconds with compatibility repairs alone and 6.1 seconds
+with plethysm caching. These are single-run timings excluding imports, plots,
+and the independent comparison, not a general performance guarantee. Checks
+through degree 10 do not establish correctness in arbitrary degree.
+
+## Regression checks
+
+The regression suite covers the documented coefficient, degree-three matrix
+and direct plethysm, save/load, independent instruction copies, decomposition
+iteration, and headless stability plots:
+
+```sh
+MPLBACKEND=Agg python -m unittest discover -s tests
+```

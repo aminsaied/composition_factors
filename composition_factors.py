@@ -1,5 +1,5 @@
 #!/usr/bin/env sage
-"""Composition Factors of `T(V)^{\otimes n}`
+r"""Composition Factors of `T(V)^{\otimes n}`
 
 Computes the composition factors of the n-th tensor power of the free
 associative algebra in terms of coefficients `c_{\lambda\mu}` indexing the
@@ -46,8 +46,20 @@ AUTHOR:
 import numpy as np
 from collections import Counter
 from itertools import product
-from copy import deepcopy
+from copy import copy
 import matplotlib.pyplot as plt
+from sage.all import (
+    Integer,
+    Partition,
+    Partitions,
+    QQ,
+    SymmetricFunctions,
+    divisors,
+    factorial,
+    load,
+    moebius,
+    save,
+)
 from sage.libs.lrcalc.lrcalc import lrcoef as lr
 
 s = SymmetricFunctions(QQ).schur()
@@ -112,7 +124,7 @@ class CompositionFactors(object):
 
     Even better, use the :meth:`display` method to get a birds-eye-view.
 
-        sage: cf.disply()
+        sage: cf.display()
 
     This returns a matplotlib plot representing the data.
     """
@@ -127,12 +139,12 @@ class CompositionFactors(object):
         """
         self.top_degree = top_degree
 
-        if _coeffs == None:
+        if _coeffs is None:
             self.coeffs = self._compute(top_degree)
         else:
             self.coeffs = _coeffs
 
-        if _matrix == None:
+        if _matrix is None:
             self.matrix = self._compute_matrix()
         else:
             self.matrix = _matrix
@@ -387,7 +399,7 @@ class MuPartition(object):
 
     @classmethod
     def iter_LR(cls, p, decomp):
-        """Recursively computes the iterate Littlewood-Richardson coefficient.
+        r"""Recursively computes the iterate Littlewood-Richardson coefficient.
 
         Args:
             p (partition): The outer partition.
@@ -447,7 +459,7 @@ class MuPartition(object):
             sage: mu.shapes
             [[3], [2, 1], [1, 1, 1]]
         """
-        if self._shapes == None:
+        if self._shapes is None:
             self._shapes = list(Partitions(self.length))
             return self._shapes
         else:
@@ -466,7 +478,7 @@ class MuPartition(object):
             sage: mu.decompositions
             {[1, 1]: [Decomp(([1], [1]))], [2]: [Decomp(([1, 1],))]}
         """
-        if self._decompositions == None:
+        if self._decompositions is None:
             self._decompositions = self._compute_decompositions()
             return self._decompositions
         else:
@@ -535,6 +547,7 @@ class Lie(object):
         self.as_list = self.up_to(n)
         self.sizes = self._compute_sizes(n)
         self._sizes_dict = self._compute_sizes_dict(n)
+        self._plethysms = {}
 
     def __str__(self):
         """Return a string representation of ``self``."""
@@ -612,6 +625,13 @@ class Lie(object):
             index = self._sizes_dict[max_]
             return self.sizes[:index]
 
+    def _plethysm(self, partition, lie_id):
+        """Cache repeated Schur plethysms for this Lie instance's lifetime."""
+        key = (Partition(partition), self.as_list[lie_id])
+        if key not in self._plethysms:
+            self._plethysms[key] = s(key[0]).plethysm(s(key[1]))
+        return self._plethysms[key]
+
     @staticmethod
     def _lie(n):
         """Symmetric polynomial representation of free Lie algebra.
@@ -629,7 +649,7 @@ class Lie(object):
 
         terms = []
         for d in divisors(n):
-            x = (Partition([d for j in range(ZZ(n/d))]), moebius(d)/n)
+            x = (Partition([d for j in range(n // d)]), QQ(moebius(d))/n)
             terms.append(x)
 
         lie_power = power.sum_of_terms(terms)
@@ -713,7 +733,7 @@ class DegreeBounds(object):
             (partition, int): The shape partition of a decomposition and its
                 corresponding upper bound.
         """
-        for shape, bound in self.bounds.iteritems():
+        for shape, bound in self.bounds.items():
             yield shape, bound
 
     def _compute_bounds(self):
@@ -730,7 +750,7 @@ class DegreeBounds(object):
         """
         bounds = self._initialise_bounds()
 
-        for shape in bounds.keys():
+        for shape in list(bounds):
 
             max_lie = bounds[shape]
             n_lie = self._lie.length_up_to(max_lie)
@@ -797,7 +817,7 @@ class DegreeBounds(object):
 
 
 class Instruction(object):
-    """A pairing up of shape indices and indices of the free Lie algebra.
+    r"""A pairing up of shape indices and indices of the free Lie algebra.
 
     Given a shape `(s_0, \ldots, s_k)`, an instruction is a mapping (in the
     form of a dictionary) of the indices `0, \ldots, k` to distinct indices of
@@ -817,7 +837,7 @@ class Instruction(object):
         Args:
             shape (partition): The shape parition of a decomposition.
         """
-        self.shape = shape
+        self.shape = Partition(shape)
         self.steps = {step_id: None for step_id in range(len(shape))}
         self._empty_slots = len(shape)
 
@@ -857,7 +877,7 @@ class Instruction(object):
         self._empty_slots -= 1
 
     def add_step_and_copy(self, step):
-        """Adds a step the instruction and return a deepcopy of ``self``.
+        """Return a copy with independent steps and the new step added.
 
         Args:
             step (int, int): A tuple of the form (``shape_id``, ``lie_id``).
@@ -874,9 +894,10 @@ class Instruction(object):
             sage: new_instruction
             {0: 4, 1: None, 2: None}
         """
-        copy = deepcopy(self)
-        copy.add_step(step)
-        return copy
+        new_instruction = copy(self)
+        new_instruction.steps = self.steps.copy()
+        new_instruction.add_step(step)
+        return new_instruction
 
     def full(self):
         """Bool checking if there are any vacant spots in the steps dict.
@@ -1034,11 +1055,7 @@ class InstructionManual(object):
                 for shape_id, p in decomposition.iteritem():
 
                     lie_id = d[shape_id]
-                    q = lie.as_list[lie_id]
-
-                    p, q = s(p), s(q)
-
-                    f *= p.plethysm(q)
+                    f *= lie._plethysm(p, lie_id)
 
                 schur_poly += f
 
@@ -1309,7 +1326,7 @@ class Decomposition(object):
 
     Attributes:
         partitions_tuple (tuple): A tuple of partitions.
-        overcount (float): A number of the form ``1/n`` where `n` accounts for
+        overcount (rational): A number of the form ``1/n`` where `n` accounts for
             repititions in ``self.partition_tuple``.
     """
 
@@ -1338,7 +1355,7 @@ class Decomposition(object):
         Yields:
             partition: The partitions of ``self.partition_tuple``.
         """
-        return iter(self.partition_tuple)
+        return iter(self.partitions_tuple)
 
     def __str__(self):
         """Return a string representation of ``self``."""
@@ -1376,14 +1393,14 @@ class Decomposition(object):
 
     @property
     def overcount(self):
-        """A number to account for the overcounting caused by repitition.
+        r"""A number to account for the overcounting caused by repitition.
 
         Repititions in ``self.partitions_tuple`` lead to unwanted
         multiplicity when assembling Schur polynomials (see
         :class:`InstructionManual`).
 
         Returns:
-            float: A number of form ``\frac{1}{n}`` where ``n`` is the number
+            rational: A number of form ``\frac{1}{n}`` where ``n`` is the number
                 of repititions caused by the structure of the decomposition.
 
         Example:
@@ -1392,7 +1409,7 @@ class Decomposition(object):
             1/2
 
         """
-        if self._overcount == None:
+        if self._overcount is None:
             self._overcount = self._compute_overcount(self.partitions_tuple)
             return self._overcount
         else:
@@ -1406,7 +1423,7 @@ class Decomposition(object):
         else:
             counter = Counter(partitions_tuple)
             res = 1
-            for count in counter.itervalues():
+            for count in counter.values():
                 res *= factorial(count)
             return Integer(1)/Integer(res)
 
@@ -1440,8 +1457,9 @@ class _LieSizeIndex(object):
         return iter(self.pairs)
 
     def copy_and_remove(self, pair):
-        """Returns a deepcopy of the instance with given pair removed."""
-        new = deepcopy(self)
+        """Return a copy with an independent pair list and one pair removed."""
+        new = copy(self)
+        new.pairs = self.pairs.copy()
         new.pairs.remove(pair)
         return new
 
@@ -1534,27 +1552,27 @@ class Visualisations(object):
 
         mask = self.cf.matrix.copy()
         mask[np.where(mask>resolution)] = resolution
-        mask[np.where(mask==0)] = None
+        mask[np.where(mask==0)] = np.nan
 
         fig = plt.figure(figsize=(width, width))
 
-        cmap = plt.cm.Paired
+        cmap = plt.cm.Paired.copy()
         cmap.set_bad('white',1.)
 
         ax = fig.add_subplot(111)
         im = ax.imshow(mask, interpolation='none', cmap=cmap)
         plt.colorbar(im)
 
-        n = len(cf.coeffs)
-        parts = [p for __, p in cf._partitions()]
+        n = len(self.cf.coeffs)
+        parts = [p for __, p in self.cf._partitions()]
 
         if ticks:
             plt.xticks(range(n), parts, rotation='vertical')
             plt.yticks(range(n), parts)
 
-        ax.tick_params(labelbottom='off',
-                       labeltop='on',
-                       labelleft="on")
+        ax.tick_params(labelbottom=False,
+                       labeltop=True,
+                       labelleft=True)
 
         ax.set_xlabel("Mu")
         ax.xaxis.set_label_position('top')
@@ -1587,18 +1605,18 @@ class Visualisations(object):
         for i in range(1, max_+1):
 
             for lambda_ in Partitions(i):
-                for mu in [p for i in range(1, i+1) for p in Partitions(i)]:
+                for mu in [p for degree in range(1, i+1) for p in Partitions(degree)]:
 
-                    if cf.coeff(lambda_, mu) >= 1:
+                    if self.cf.coeff(lambda_, mu) >= 1:
                         sizes, data = self._push_diagonal(lambda_, mu)
 
-                        if len(data) > seq_length:
+                        if len(data) >= seq_length:
                             if max(data) <= resolution:
                                 plt.plot(sizes, data, 'o-')
 
         plt.xlabel("Sum of sizes of lambda and mu partition")
         plt.ylabel('Coefficient')
-        plt.xticks(range(2*max_))
+        plt.xticks(range(2*max_+1))
 
         return fig
 
@@ -1619,7 +1637,7 @@ class Visualisations(object):
         size = sum(lambda_) + sum(mu)
 
         sizes, data = [], []
-        while sum(lambda_) < max_:
+        while sum(lambda_) <= max_:
             c = self.cf.coeff(lambda_, mu)
 
             data.append(c)
@@ -1656,26 +1674,26 @@ class Visualisations(object):
         for i in range(1, max_+1):
 
             for lambda_ in Partitions(i):
-                for mu in [p for i in range(1, i+1) for p in Partitions(i)]:
+                for mu in [p for degree in range(1, i+1) for p in Partitions(degree)]:
 
-                    if cf.coeff(lambda_, mu) >= 1:
+                    if self.cf.coeff(lambda_, mu) >= 1:
                         sizes, data = self._push_down(lambda_, mu)
 
-                        if len(data) > seq_length:
+                        if len(data) >= seq_length:
                             if max(data) <= resolution:
                                 plt.plot(sizes, data, 'o-')
 
         plt.xlabel("Sizes of lambda partition")
         plt.ylabel('Coefficient')
-        plt.xticks(range(2*max_))
+        plt.xticks(range(1, max_+1))
 
         return fig
 
     def _push_down(self, lambda_, mu):
-        """Computes list of coefficients in the PD-stable direction.
+        """Computes list of coefficients in the FI-stable direction.
 
-        Uses ``self.cf`` to compute the coefficints of ``lambda`` and ``mu``,
-        adding a box to the top row of each
+        Uses ``self.cf`` to compute the coefficients while adding a box to
+        the top row of ``lambda`` and keeping ``mu`` fixed.
 
         Args:
             lambda_ (partition): Base outer partition for the stability check.
@@ -1685,10 +1703,10 @@ class Visualisations(object):
             List of sizes of lambda_ partitions and list their coefficients.
         """
         max_  = self.cf.top_degree
-        size = sum(lambda_) + sum(mu)
+        size = sum(lambda_)
 
         sizes, data = [], []
-        while sum(lambda_) < max_:
+        while sum(lambda_) <= max_:
             c = self.cf.coeff(lambda_, mu)
 
             data.append(c)
