@@ -39,6 +39,13 @@ Sage payload. The full checksum command above requires all three listed files.
 
 LFS pointer files are not the dataset. Use a Git checkout and `git lfs pull`;
 do not assume a source ZIP or a raw pointer file contains the payloads.
+Keep TLS verification enabled. If a custom `GIT_SSL_CAINFO` bundle contains
+only private trust roots, Git LFS can reject GitHub's public certificate even
+when ordinary Git works: it uses that bundle instead of the system roots.
+Select an existing, appropriate trusted CA bundle for the individual command;
+do not disable certificate verification or mistake an `x509` error at
+`locks/verify` for proof that GitHub lacks LFS support.
+
 `SHA256SUMS` hashes physical file bytes, as do the LFS object IDs. The report's
 `coefficient_sha256` instead hashes canonical coefficient JSON without its
 final newline, so those two JSON digests intentionally differ.
