@@ -43,11 +43,10 @@ AUTHOR:
 #                  http://www.gnu.org/licenses/
 #*****************************************************************************
 
-import numpy as np
 from collections import Counter
 from itertools import product
 from copy import copy
-import matplotlib.pyplot as plt
+from operator import index as integer_index
 from sage.all import (
     Integer,
     Partition,
@@ -64,6 +63,36 @@ from sage.libs.lrcalc.lrcalc import lrcoef as lr
 
 s = SymmetricFunctions(QQ).schur()
 power = SymmetricFunctions(QQ).power()
+
+ALGORITHM_VERSION = 1
+
+
+def _positive_degree(value, name="degree"):
+    if isinstance(value, bool):
+        raise TypeError(f"{name} must be a positive integer.")
+    try:
+        value = integer_index(value)
+    except TypeError as error:
+        raise TypeError(f"{name} must be a positive integer.") from error
+    if value < 1:
+        raise ValueError(f"{name} must be a positive integer.")
+    return value
+
+
+def _positive_partition(value):
+    try:
+        raw = tuple(value)
+        parts = tuple(integer_index(part) for part in raw)
+    except TypeError as error:
+        raise ValueError("A partition must contain positive integers.") from error
+    if (
+        not parts
+        or any(isinstance(part, bool) for part in raw)
+        or any(part < 1 for part in parts)
+        or any(left < right for left, right in zip(parts, parts[1:]))
+    ):
+        raise ValueError("A partition must be nonempty and weakly decreasing.")
+    return Partition(parts)
 
 
 class CompositionFactors(object):
@@ -117,6 +146,7 @@ class CompositionFactors(object):
     For larger partitions it is possibly more convenient to look-up a specific
     coefficient.
 
+        sage: cf = CompositionFactors(10)
         sage: lambda_ = Partition([4,3,3])
         sage: mu= Partition([3,2])
         sage: cf[lambda_][mu]
@@ -129,7 +159,8 @@ class CompositionFactors(object):
     This returns a matplotlib plot representing the data.
     """
 
-    def __init__(self, top_degree, _coeffs=None, _matrix=None):
+    def __init__(self, top_degree, _coeffs=None, _matrix=None, *,
+                 progress=None, cache_assemblies=True):
         """Initialise ``self``.
 
         Computes the coefficients for all degree up to ``top_degree``.
@@ -137,17 +168,26 @@ class CompositionFactors(object):
         Args:
             top_degree (int): The top degree of symmetric functions computed.
         """
-        self.top_degree = top_degree
+        self.top_degree = _positive_degree(top_degree)
+        self._partition_list = None
 
         if _coeffs is None:
-            self.coeffs = self._compute(top_degree)
+            self.coeffs = self._compute(self.top_degree, progress, cache_assemblies)
         else:
             self.coeffs = _coeffs
 
-        if _matrix is None:
-            self.matrix = self._compute_matrix()
-        else:
-            self.matrix = _matrix
+        self._matrix = _matrix
+
+    @property
+    def matrix(self):
+        """The lazily constructed floating-point visualization matrix."""
+        if self._matrix is None:
+            self._matrix = self._compute_matrix()
+        return self._matrix
+
+    @matrix.setter
+    def matrix(self, value):
+        self._matrix = value
 
     def __getitem__(self, key):
         """Return ``self.coeffs`` value stored at ``key``.
@@ -168,7 +208,7 @@ class CompositionFactors(object):
             sage: cf = CompositionFactors(15)
             sage: cf.save('composition_factors_15')
         """
-        save_coeffs = [self.top_degree, self.coeffs, self.matrix]
+        save_coeffs = [self.top_degree, self.coeffs, self._matrix]
         save(save_coeffs, filename)
 
     @classmethod
@@ -198,20 +238,25 @@ class CompositionFactors(object):
             sage: cf.coeff(lambda_, mu)
             1
         """
-        lambda_ = Partition(lambda_)
-        mu = Partition(mu)
+        lambda_ = _positive_partition(lambda_)
+        mu = _positive_partition(mu)
+        if max(sum(lambda_), sum(mu)) > self.top_degree:
+            raise ValueError(f"The requested partition exceeds computed degree {self.top_degree}.")
+        if sum(mu) > sum(lambda_):
+            return Integer(0)
+        try:
+            return self.coeffs[lambda_][mu]
+        except KeyError as error:
+            raise ValueError(f"Missing coefficient data for partitions {lambda_}, {mu}.") from error
 
-        assert sum(lambda_) <= self.top_degree
-        assert sum(mu) <= self.top_degree
-
-        return self.coeffs[lambda_][mu]
-
-    def _compute(self, top_degree):
+    def _compute(self, top_degree, progress, cache_assemblies):
         """Compute coefficients up to ``top_degree``."""
         coeffs = {}
 
         for i in range(1, top_degree+1):
-            cf_deg = CompositionFactorsAtDegree(i)
+            cf_deg = CompositionFactorsAtDegree(
+                i, progress=progress, cache_assemblies=cache_assemblies
+            )
             coeffs.update(cf_deg.table.table)
 
         return coeffs
@@ -222,22 +267,27 @@ class CompositionFactors(object):
         Returns numpy array storing the coefficients. Rows correspond to
         LambdaPartitions and columns to MuPartitions.
         """
-        n = len(self.coeffs)
+        import numpy as np
+
+        positions = {part: position for position, part in self._partitions()}
+        n = len(positions)
         M = np.zeros((n, n))
 
-        for lambda_id, lambda_ in self._partitions():
-            for mu_id, mu in self._partitions():
-                if mu in self.coeffs[lambda_].keys():
-                    M[lambda_id][mu_id] = self.coeffs[lambda_][mu]
+        for lambda_, row in self.coeffs.items():
+            for mu, value in row.items():
+                M[positions[lambda_], positions[mu]] = value
         return M
 
     def _partitions(self):
         """Generator enumerating all partitions up to top degree."""
-        all_parts = [part for i in range(1, self.top_degree+1) for part in Partitions(i)]
-        for index, part in enumerate(all_parts):
-            yield index, part
+        if self._partition_list is None:
+            self._partition_list = tuple(
+                part for degree in range(1, self.top_degree + 1) for part in Partitions(degree)
+            )
+        yield from enumerate(self._partition_list)
 
-    def display(self, resolution=np.inf, width=20, ticks=True):
+    def display(self, resolution=float("inf"), width=20, ticks=True, *,
+                cmap="Paired", normalization="linear"):
         """Displays a representation of :attr:`matrix`.
 
         Uses the :class:`Visualisations` to display an image of `self.matrix`.
@@ -249,7 +299,7 @@ class CompositionFactors(object):
         dimensional features.
         """
         vis = Visualisations(self)
-        return vis.display(resolution, width, ticks)
+        return vis.display(resolution, width, ticks, cmap=cmap, normalization=normalization)
 
 
 class CompositionFactorsAtDegree(object):
@@ -275,7 +325,7 @@ class CompositionFactorsAtDegree(object):
         table (:class:`CoefficientTable`): Holds the coefficients.
     """
 
-    def __init__(self, target):
+    def __init__(self, target, *, progress=None, cache_assemblies=True):
         """Computes the composition factors of a fixed degree.
 
         Args:
@@ -288,10 +338,14 @@ class CompositionFactorsAtDegree(object):
             sage: cf_deg4[lambda_][mu]
             2
         """
-        self.target = target
-        self.lie    = Lie(target)
-        self.lookup = InstructionLookup(target)
-        self.table  = CoefficientTable(target)
+        self.target = _positive_degree(target)
+        self.progress = progress
+        self.cache_assemblies = cache_assemblies
+        self._notify("lie")
+        self.lie = Lie(self.target)
+        self._notify("instructions")
+        self.lookup = InstructionLookup(self.target, lie=self.lie)
+        self.table = CoefficientTable(self.target)
 
         self._compute()
 
@@ -311,29 +365,45 @@ class CompositionFactorsAtDegree(object):
                 through all shapes, while the MuPartition cycles through all
                 MuPartitions of the given shape.
         """
-        for i in range(1, self.target):
-            for p in Partitions(i):
-                mu = MuPartition(p)
-                for shape in mu.shapes:
-                    yield shape, mu
+        for mu in self._mu_partitions():
+            for shape in mu.shapes:
+                yield shape, mu
+
+    def _mu_partitions(self):
+        for degree in range(1, self.target):
+            for part in Partitions(degree):
+                yield MuPartition(part)
+
+    def _notify(self, stage, **counts):
+        if self.progress is not None:
+            self.progress({"degree": self.target, "stage": stage, **counts})
 
     def _compute(self):
         """Implements the algorithm computing composition factors."""
-        for shape, mu in self.shape_mu_pairs():
-
-            if shape in self.lookup:
-
-                decompositions = mu.decompositions[shape]
+        assembled = {}
+        total = int(sum(Partitions(degree).cardinality() for degree in range(1, self.target)))
+        for completed, mu in enumerate(self._mu_partitions(), 1):
+            for shape in mu.shapes:
+                if shape not in self.lookup:
+                    continue
+                decompositions = mu.decompositions_for(shape)
                 manual = self.lookup[shape]
 
                 for decomposition in decompositions:
-
                     lr_coeff = mu.lr_coeff(decomposition)
-
                     if lr_coeff > 0:
-                        schur = manual.assemble(decomposition, self.lie)
+                        if self.cache_assemblies:
+                            key = (shape, decomposition.partitions_tuple)
+                            if key not in assembled:
+                                assembled[key] = manual.assemble(decomposition, self.lie)
+                            schur = assembled[key]
+                        else:
+                            schur = manual.assemble(decomposition, self.lie)
                         over = decomposition.overcount
                         self.table.add(schur, mu.partition, lr_coeff*over)
+            self._notify("coefficients", completed=completed, total=total)
+        if total == 0:
+            self._notify("coefficients", completed=0, total=0)
 
 
 class MuPartition(object):
@@ -369,7 +439,7 @@ class MuPartition(object):
         self.length = sum(partition)
 
         self._shapes = None
-        self._decompositions = None
+        self._decompositions = {}
 
     def __str__(self):
         """Return string representation of ``self``."""
@@ -478,36 +548,25 @@ class MuPartition(object):
             sage: mu.decompositions
             {[1, 1]: [Decomp(([1], [1]))], [2]: [Decomp(([1, 1],))]}
         """
-        if self._decompositions is None:
-            self._decompositions = self._compute_decompositions()
-            return self._decompositions
-        else:
-            return self._decompositions
-
-    def _compute_decompositions(self):
-        """Return dictionary of decompositions of ``self``."""
-        d = {}
-
         for shape in self.shapes:
+            self.decompositions_for(shape)
+        return self._decompositions
 
-            shape_decompositions = []
-
-            partitions = [Partitions(i, outer=self.partition) for i in shape]
-
-            combos = list(product(*partitions))
-
-            for combo in combos:
-
-                order_partition = lambda x: (sum(x), len(x))
-                sorted_combo = tuple(sorted(combo, reverse=True, key=order_partition))
-
-                if sorted_combo not in shape_decompositions:
-                    decomp = Decomposition(sorted_combo)
-                    shape_decompositions.append(decomp)
-
-            d[shape] = shape_decompositions
-
-        return d
+    def decompositions_for(self, shape):
+        """Compute only this shape, preserving the historical ordering."""
+        shape = _positive_partition(shape)
+        if sum(shape) != self.length:
+            raise ValueError("The decomposition shape must have the same size as mu.")
+        if shape not in self._decompositions:
+            decompositions, seen = [], set()
+            partitions = [Partitions(size, outer=self.partition) for size in shape]
+            for combo in product(*partitions):
+                ordered = tuple(sorted(combo, reverse=True, key=lambda part: (sum(part), len(part))))
+                if ordered not in seen:
+                    seen.add(ordered)
+                    decompositions.append(Decomposition(ordered))
+            self._decompositions[shape] = decompositions
+        return self._decompositions[shape]
 
 
 class Lie(object):
@@ -542,11 +601,18 @@ class Lie(object):
         Args:
             n (int): The maximum degree of the free Lie algebra considered.
         """
-        self.max_degree = n
-        self.lie = self._lie(n)
-        self.as_list = self.up_to(n)
-        self.sizes = self._compute_sizes(n)
-        self._sizes_dict = self._compute_sizes_dict(n)
+        self.max_degree = _positive_degree(n)
+        characters = [self._lie(degree) for degree in range(1, self.max_degree + 1)]
+        self.lie = characters[-1]
+        self.as_list = [
+            part for character in characters for part, multiplicity in character
+            for _ in range(int(multiplicity))
+        ]
+        self.sizes = [int(sum(part)) for part in self.as_list]
+        counts = Counter(self.sizes)
+        self._sizes_dict = {0: 0}
+        for degree in range(1, self.max_degree + 1):
+            self._sizes_dict[degree] = self._sizes_dict[degree - 1] + counts[degree]
         self._plethysms = {}
 
     def __str__(self):
@@ -616,14 +682,20 @@ class Lie(object):
             sage: lie.sizes_up_to(5)
             [1,2,3,4,4,5,5,5,5,5]
         """
-        m = self.max_degree
-        assert max_ <= m
-
-        if max_ == m:
+        count = self.count_up_to(max_)
+        if max_ == self.max_degree:
             return self.sizes
         else:
-            index = self._sizes_dict[max_]
-            return self.sizes[:index]
+            return self.sizes[:count]
+
+    def count_up_to(self, degree):
+        """Count summands, including multiplicity, without rebuilding Lie data."""
+        if isinstance(degree, bool):
+            raise TypeError("The Lie degree bound must be an integer.")
+        degree = integer_index(degree)
+        if not 0 <= degree <= self.max_degree:
+            raise ValueError(f"The Lie degree bound must be between 0 and {self.max_degree}.")
+        return self._sizes_dict[degree]
 
     def _plethysm(self, partition, lie_id):
         """Cache repeated Schur plethysms for this Lie instance's lifetime."""
@@ -671,11 +743,10 @@ class Lie(object):
     @classmethod
     def _compute_sizes_dict(cls, n):
         """Return a dictionary mapping indices to lengths."""
-        index_dict = {}
-
+        counts = Counter(cls._compute_sizes(n))
+        index_dict = {0: 0}
         for i in range(1, n+1):
-            index_dict[i] = len(cls._compute_sizes(i))
-
+            index_dict[i] = index_dict[i - 1] + counts[i]
         return index_dict
 
 
@@ -753,7 +824,7 @@ class DegreeBounds(object):
         for shape in list(bounds):
 
             max_lie = bounds[shape]
-            n_lie = self._lie.length_up_to(max_lie)
+            n_lie = self._lie.count_up_to(max_lie) if max_lie > 0 else 0
 
             if n_lie < len(shape):
                 del bounds[shape]
@@ -1140,14 +1211,16 @@ class InstructionLookup(object):
             mapping from shape partitions to instruction manuals.
     """
 
-    def __init__(self, target):
+    def __init__(self, target, lie=None):
         """Computes the lookup dict.
 
         Args:
             target (int): The target size for the instruction manuals.
         """
-        self.target = target
-        self.lie = Lie(target)
+        self.target = _positive_degree(target)
+        self.lie = Lie(self.target) if lie is None else lie
+        if self.lie.max_degree < self.target:
+            raise ValueError("The supplied Lie data does not reach the target degree.")
         self.bounds = DegreeBounds(self.target, self.lie)
         self.lookup_dict = self._compute_lookup_dict()
 
@@ -1530,7 +1603,8 @@ class Visualisations(object):
         """
         self.cf = cf
 
-    def display(self, resolution=np.inf, width=20, ticks=True):
+    def display(self, resolution=float("inf"), width=20, ticks=True, *,
+                cmap="Paired", normalization="linear"):
         """Displays an array representing :attr:`matrix`.
 
         When considered as an array of integers, the data can be visualised as
@@ -1543,44 +1617,65 @@ class Visualisations(object):
             resolution (int): (default ``np.inf``) Caps the coefficients
                 appearing in :attr:`matrix`.
             width (int): (default `20`) The width to display the figure.
-            ticks (bool): (default `True`) Whether to set axis ticks.
+            ticks (bool or str): Partition ticks, no ticks, or ``"degree"``.
+            cmap (str): Matplotlib palette name, or ``"historical"``.
+            normalization (str): ``"linear"`` or ``"log"``.
 
         Returns:
             A figure displaying :attr:`matrix`, (possibly) with values capped
                 at ``resolution``.
         """
 
-        mask = self.cf.matrix.copy()
-        mask[np.where(mask>resolution)] = resolution
-        mask[np.where(mask==0)] = np.nan
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import LinearSegmentedColormap, LogNorm
 
-        fig = plt.figure(figsize=(width, width))
+        if ticks not in (True, False, "degree"):
+            raise ValueError("ticks must be True, False, or 'degree'.")
+        if normalization not in ("linear", "log"):
+            raise ValueError("normalization must be 'linear' or 'log'.")
+        if not resolution > 0:
+            raise ValueError("resolution must be positive.")
+        if not 0 < width < float("inf"):
+            raise ValueError("width must be positive and finite.")
+        if cmap == "historical":
+            palette = LinearSegmentedColormap.from_list(
+                "historical_paired", plt.get_cmap("Paired").colors, N=256
+            )
+        else:
+            palette = plt.get_cmap(cmap).copy()
+        palette.set_bad("white", 1.0)
+        mask = np.minimum(self.cf.matrix, resolution)
+        mask[mask == 0] = np.nan
+        norm = LogNorm() if normalization == "log" else None
+        fig, ax = plt.subplots(figsize=(width, width))
+        im = ax.imshow(mask, interpolation="none", cmap=palette, norm=norm)
+        fig.colorbar(im, ax=ax)
 
-        cmap = plt.cm.Paired.copy()
-        cmap.set_bad('white',1.)
+        parts = [part for _, part in self.cf._partitions()]
+        if ticks is False:
+            ax.set_xticks([])
+            ax.set_yticks([])
+        elif ticks == "degree":
+            counts = Counter(sum(part) for part in parts)
+            positions, labels, start = [], [], 0
+            for degree in range(1, self.cf.top_degree + 1):
+                positions.append(start + (counts[degree] - 1) / 2)
+                labels.append(str(degree))
+                start += counts[degree]
+            ax.set_xticks(positions, labels)
+            ax.set_yticks(positions, labels)
+        else:
+            ax.set_xticks(range(len(parts)), parts, rotation="vertical")
+            ax.set_yticks(range(len(parts)), parts)
 
-        ax = fig.add_subplot(111)
-        im = ax.imshow(mask, interpolation='none', cmap=cmap)
-        plt.colorbar(im)
-
-        n = len(self.cf.coeffs)
-        parts = [p for __, p in self.cf._partitions()]
-
-        if ticks:
-            plt.xticks(range(n), parts, rotation='vertical')
-            plt.yticks(range(n), parts)
-
-        ax.tick_params(labelbottom=False,
-                       labeltop=True,
-                       labelleft=True)
-
-        ax.set_xlabel("Mu")
+        ax.tick_params(labelbottom=False, labeltop=True, labelleft=True)
+        ax.set_xlabel("Mu degree" if ticks == "degree" else "Mu")
         ax.xaxis.set_label_position('top')
-        ax.set_ylabel("Lambda")
-
+        ax.set_ylabel("Lambda degree" if ticks == "degree" else "Lambda")
         return fig
 
-    def PD_stability(self, resolution=np.inf, seq_length=2, width=20):
+    def PD_stability(self, resolution=float("inf"), seq_length=2, width=20, *, unique=False):
         """We investigate adding one box to the top row of each partition.
 
         Plots a graph of how the coefficients change when adding one box to
@@ -1593,31 +1688,71 @@ class Visualisations(object):
             seq_length (int): (default: 2) Only display sequences of length at
                 least ``seq_length``.
             width (int): The width of the figure to output.
+            unique (bool): Keep only the earliest eligible start of each chain.
 
         Returns:
             A matplotlib figure plotting of the growing coefficients.
         """
 
-        fig = plt.figure(figsize=(width, width))
+        return self._plot_stability("PD", resolution, seq_length, width, unique)
 
-        max_ = self.cf.top_degree
+    def stability_sequences(self, direction="PD", resolution=float("inf"),
+                            seq_length=2, *, unique=False):
+        """Return exact trajectory data without importing Matplotlib.
 
-        for i in range(1, max_+1):
+        Each record contains the starting ``lambda`` and ``mu`` tuples,
+        ``sizes``, and integer ``coefficients``. Only positive starting
+        coefficients are considered, as in the historical plots. With
+        ``unique=True``, keep the earliest start satisfying both filters
+        in each chain, not every suffix of that trajectory.
+        """
+        if direction not in ("PD", "FI"):
+            raise ValueError("direction must be 'PD' or 'FI'.")
+        seq_length = _positive_degree(seq_length, "seq_length")
+        if not resolution > 0:
+            raise ValueError("resolution must be positive.")
+        sequences, seen = [], set()
+        for _, lambda_ in self.cf._partitions():
+            for mu, value in self.cf.coeffs[lambda_].items():
+                if value < 1:
+                    continue
+                if direction == "PD":
+                    key = (tuple(lambda_[1:]), tuple(mu[1:]), lambda_[0] - mu[0])
+                    push = self._push_diagonal
+                else:
+                    key = (tuple(lambda_[1:]), tuple(mu))
+                    push = self._push_down
+                if unique and key in seen:
+                    continue
+                sizes, data = push(lambda_, mu)
+                if len(data) >= seq_length and max(data) <= resolution:
+                    seen.add(key)
+                    sequences.append({
+                        "lambda": tuple(int(part) for part in lambda_),
+                        "mu": tuple(int(part) for part in mu),
+                        "sizes": [int(size) for size in sizes],
+                        "coefficients": [int(value) for value in data],
+                    })
+        return sequences
 
-            for lambda_ in Partitions(i):
-                for mu in [p for degree in range(1, i+1) for p in Partitions(degree)]:
+    def _plot_stability(self, direction, resolution, seq_length, width, unique):
+        import matplotlib.pyplot as plt
 
-                    if self.cf.coeff(lambda_, mu) >= 1:
-                        sizes, data = self._push_diagonal(lambda_, mu)
-
-                        if len(data) >= seq_length:
-                            if max(data) <= resolution:
-                                plt.plot(sizes, data, 'o-')
-
-        plt.xlabel("Sum of sizes of lambda and mu partition")
-        plt.ylabel('Coefficient')
-        plt.xticks(range(2*max_+1))
-
+        if not 0 < width < float("inf"):
+            raise ValueError("width must be positive and finite.")
+        sequences = self.stability_sequences(
+            direction, resolution, seq_length, unique=unique
+        )
+        fig, ax = plt.subplots(figsize=(width, width))
+        for sequence in sequences:
+            ax.plot(sequence["sizes"], sequence["coefficients"], "o-")
+        if direction == "PD":
+            ax.set_xlabel("Sum of sizes of lambda and mu partition")
+            ax.set_xticks(range(2 * self.cf.top_degree + 1))
+        else:
+            ax.set_xlabel("Sizes of lambda partition")
+            ax.set_xticks(range(1, self.cf.top_degree + 1))
+        ax.set_ylabel("Coefficient")
         return fig
 
     def _push_diagonal(self, lambda_, mu):
@@ -1649,7 +1784,7 @@ class Visualisations(object):
 
         return sizes, data
 
-    def FI_stability(self, resolution=np.inf, seq_length=2, width=20):
+    def FI_stability(self, resolution=float("inf"), seq_length=2, width=20, *, unique=False):
         """We investigate adding one box to the top row of the lambdas.
 
         Plots a graph of how the coefficients change when adding one box to
@@ -1662,32 +1797,13 @@ class Visualisations(object):
             seq_length (int): (default: 2) Only display sequences of length at
                 least ``seq_length``.
             width (int): The width of the figure to output.
+            unique (bool): Keep only the earliest eligible start of each chain.
 
         Returns:
             A matplotlib figure plotting of the changing coefficients.
         """
 
-        fig = plt.figure(figsize=(width, width))
-
-        max_ = self.cf.top_degree
-
-        for i in range(1, max_+1):
-
-            for lambda_ in Partitions(i):
-                for mu in [p for degree in range(1, i+1) for p in Partitions(degree)]:
-
-                    if self.cf.coeff(lambda_, mu) >= 1:
-                        sizes, data = self._push_down(lambda_, mu)
-
-                        if len(data) >= seq_length:
-                            if max(data) <= resolution:
-                                plt.plot(sizes, data, 'o-')
-
-        plt.xlabel("Sizes of lambda partition")
-        plt.ylabel('Coefficient')
-        plt.xticks(range(1, max_+1))
-
-        return fig
+        return self._plot_stability("FI", resolution, seq_length, width, unique)
 
     def _push_down(self, lambda_, mu):
         """Computes list of coefficients in the FI-stable direction.

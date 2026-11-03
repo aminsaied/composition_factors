@@ -46,6 +46,18 @@ For an interactive session, start `sage` and import the classes explicitly:
 from composition_factors import CompositionFactors, Lie, Visualisations
 ```
 
+To make the library and `composition-factors` command available outside the
+repository directory, install into the activated Sage environment:
+
+```sh
+python -m pip install --no-deps --no-build-isolation -e .
+composition-factors --help
+```
+
+SageMath must still be installed separately for computations and plots. Help,
+checkpoint inspection, exact queries, and CSV export use only Python's standard
+library and can also run directly as `python compute.py ...` without Sage.
+
 ## Examples
 
 Compute all coefficients for partitions of size up `n` with `cf = CompositionFactors(n)`.  
@@ -98,7 +110,16 @@ PY
 Reload with `CompositionFactors.load("composition_factors_6")`. Sage's `.sobj`
 files use pickle: only load files from a trusted source. The nested `coeffs`
 dictionary contains exact coefficients; the NumPy `matrix` is a floating-point
-view intended for visualisation, not exact large-integer arithmetic.
+view intended for visualisation, not exact large-integer arithmetic. The matrix
+is constructed only when accessed or plotted; saving a result does not force
+its construction.
+
+`coeff(lambda_, mu)` accepts nonempty, weakly decreasing partitions of positive
+integers within the computed range. It returns zero when the mu degree exceeds
+the lambda degree, and raises `ValueError` for uncomputed or malformed queries.
+Computation degrees must be positive integers. Degree zero and the empty
+partition are outside this API's domain. Direct nested-dictionary access
+remains available, including its existing triangular storage convention.
 
 Stability plots include the highest computed degree. `seq_length` is an
 inclusive minimum; FI plots use the size of the lambda-partition, and PD plots
@@ -107,7 +128,35 @@ use the sum of the two partition sizes.
 Start with degree 6 before attempting larger computations: the number of
 partitions, decompositions, and assembly instructions grows rapidly. No GPU is
 required. Repeated Schur plethysms are cached within each degree's Lie instance;
-the cache is released with that computation rather than retained globally.
+complete assemblies are also cached for the duration of one degree. The
+computation and instruction lookup share Lie data. Decompositions are generated
+only for requested shapes, preserving their historical ordering and multiplicity.
+For controlled comparisons or a lower-memory run, the library accepts
+`CompositionFactors(n, cache_assemblies=False)` to disable complete-assembly
+caching while retaining the plethysm cache.
+
+### Plot controls and exact trajectories
+
+```python
+cf.display(ticks=False)  # genuinely suppress both axes' ticks
+cf.display(ticks="degree", cmap="historical", normalization="log")
+vis = Visualisations(cf)
+sequences = vis.stability_sequences("PD", seq_length=3, unique=True)
+figure = vis.PD_stability(seq_length=3, unique=True)
+```
+
+`ticks="degree"` labels degree blocks instead of every partition. The
+`historical` palette reconstructs the continuous 256-color Paired palette used
+in the original figures; the default remains modern Matplotlib's `Paired`.
+Any Matplotlib palette name is accepted. Normalization is `linear` by default,
+or `log` for positive coefficients; zeros remain white. These are display
+choices and never modify exact values.
+
+`stability_sequences("PD" or "FI", ...)` returns starting `lambda`/`mu` tuples,
+`sizes`, and integer `coefficients` without importing Matplotlib. By default,
+all positive starting coefficients are considered, preserving the previous
+plots. `unique=True` retains only the earliest start in each chain satisfying
+the length and resolution filters, instead of redrawing its suffixes.
 
 ### Verified CPU example
 
@@ -117,11 +166,32 @@ All 19,044 pairs in the full matrix agree with a separate truncated power-sum
 plethysm calculation. The documented coefficients `2` and `84` are reproduced,
 and saving, reloading, and all three headless plots work.
 
-On the same two-CPU Linux devbox, a fresh-process `CompositionFactors(10)`
+Before the follow-up optimizations, on the same two-CPU Linux devbox, a
+fresh-process `CompositionFactors(10)`
 computation took 36.2 seconds with compatibility repairs alone and 6.1 seconds
 with plethysm caching. These are single-run timings excluding imports, plots,
 and the independent comparison, not a general performance guarantee. Checks
 through degree 10 do not establish correctness in arbitrary degree.
+
+### Follow-up optimization benchmarks
+
+After adding complete-assembly caching, per-shape decomposition generation,
+and shared Lie setup, matching fresh-process measurements on the same CPU host
+and pinned environment gave:
+
+| Computation through degree | Modernization baseline | Follow-up implementation | Speedup |
+| --- | ---: | ---: | ---: |
+| 10 | 6.14 s | 3.27 s | 1.87x |
+| 12 | 58.77 s | 29.08 s | 2.02x |
+
+Degree 10 uses the median of three interleaved runs per implementation;
+degree 12 uses one run each. Timings include all positive degrees through the
+target **and construction of the dense matrix**, excluding imports,
+serialization, plots, and independent comparisons. This accounts for the new
+implementation's lazy matrix rather than comparing different amounts of work.
+All 11,313 stored coefficients through degree 10 and all 43,044 through degree
+12 retain their exact baseline hashes. These measurements do not imply the
+same speedup at every degree.
 
 ## Larger CPU runs
 
@@ -187,6 +257,10 @@ contains exact `coefficients.json`, a reloadable `composition_factors.sobj`, and
 `report.json` with counts, source/coefficient hashes, incremental timing, and
 peak process RSS. **Each timing measures the new degree only**, not a fresh
 computation through that degree. RSS is the peak of the current process.
+The CLI reports setup stages and counts of completed mu partitions within each
+degree. Use `--progress-interval SECONDS` to adjust the default 30-second
+reporting interval; counts measure completed inputs, not estimated elapsed-time
+percentages. A single expensive input can still take longer than the interval.
 
 Use a **new output directory for each invocation**; existing directories are
 never overwritten. After an interruption, resume from the highest degree whose
@@ -199,6 +273,8 @@ integrity checks, not a security boundary. Resumption requires the same
 `composition_factors.py` source hash, matching coefficient data, and a
 successful save/load record. A checkpoint with a failed independent comparison
 is rejected. A pending comparison is reported as unfinished, not passed.
+Use the explicit migration command below after a compatible source update.
+Ordinary resumption never silently ignores a source mismatch.
 
 For a bounded Linux run in the activated environment:
 
@@ -225,6 +301,74 @@ mu-partitions of sizes at most 4, add both `--reference` and
 bound. Reports record the actual number of pairs compared. A checkpoint is
 saved before this comparison, and a mismatch produces a nonzero exit.
 
+### Inspect, query, export, compare, and migrate
+
+All commands also work as `python compute.py COMMAND ...`. Existing invocations
+such as `python compute.py --degree 6 --output results/run` remain supported.
+
+```sh
+composition-factors inspect results/first-run/degree12
+composition-factors query results/first-run/degree12 --lambda 4,3,3 --mu 3,2
+composition-factors export results/first-run/degree12 --output coefficients.csv --nonzero
+composition-factors compare results/first-run/degree12 --reference-max-mu-size 4
+composition-factors plot results/first-run/degree12 --output matrix.png \
+  --ticks degree --palette historical --normalization log
+composition-factors plot results/first-run/degree12 --kind pd --unique \
+  --seq-length 3 --output pd.png
+composition-factors migrate results/first-run/degree12 --output results/migrated12
+composition-factors compute --degree 14 --resume results/migrated12 \
+  --output results/continued
+```
+
+Inspection, queries, and export read exact JSON, not pickle, and need no Sage.
+CSV columns are `lambda`, `mu`, and `multiplicity`; partitions use comma-separated
+parts and are CSV-quoted where necessary. `--nonzero` omits zero records.
+All output files/directories must be new. Plotting and comparison load existing
+exact data without recomputing its coefficients or modifying the checkpoint.
+Comparison checks all columns unless a bound is supplied.
+
+Migration supports the current algorithm version and the recognized
+pre-versioning modernization source
+`3f6234d0539e7bca6fa4548416c6b728bb2807666b27c1b1d924e8ec8dc8241b`.
+It verifies the complete stored shape, exact hash, nonnegative integer values,
+and same-degree identity entries; independently compares mu sizes up to 4 by
+default; and writes a new checkpoint with the current source hash and original
+provenance. Use `--reference-max-mu-size N` to change that comparison scope.
+The partial comparison is not a proof of all coefficients. Unknown legacy
+sources or algorithm versions are rejected rather than overridden. Original
+files are untouched, and migration reads no pickle.
+
+### Exact JSON format
+
+New reports declare `format_version: 1` and `algorithm_version: 1`. The former
+versions the file contract; the latter identifies the mathematical algorithm's
+compatibility contract, independently of formatting and plotting changes.
+The source and runner hashes still record the actual implementation bytes.
+
+`coefficients.json` remains a list of records:
+
+```json
+{"lambda": [2, 1], "mu": [1], "multiplicity": 1}
+```
+
+Each pair appears exactly once for every positive lambda degree up to the
+reported degree and every positive mu degree at most that lambda degree,
+including zeros. Parts must be positive integers in weakly decreasing order,
+and multiplicities must be nonnegative integers. Same-degree entries form an
+identity matrix. The SHA-256 hashes the list sorted lexicographically by
+`(lambda, mu)`, serialized with record fields in the order above and compact
+JSON separators, without the final newline.
+
+`coefficient_data.read_checkpoint(path)` validates this contract, reported
+counts, and the coefficient hash and returns exact Python integers. Historical
+unversioned reports using the same record layout are readable as format 0.
+Unknown formats, duplicate/missing entries, malformed values, inconsistent
+counts, hash mismatches, and recorded failed comparisons are rejected. A
+reported successful comparison must include its exact pair count and mu-size
+bound, and these must agree with the validated partition domain. Resumption
+also rejects an incompatible algorithm version even if the source hash matches. Hashes
+detect inconsistency, not maliciously rewritten data or mathematical errors.
+
 ### Completed degree-14 run
 
 A subsequent two-hour-budget run successfully extended the saved degree-12
@@ -241,8 +385,26 @@ Matching that size alone is not a comparison against the original dataset.
 Peak process RSS was 826 MiB. All 80,616 stored coefficients through degree 13
 were preserved. The independent comparison matched 5,577 pairs: all 507 lambda
 rows against the 11 mu-partitions of sizes 1 through 4, not the whole matrix.
-The run used the same mathematical source as this repository and a precursor
-of the portable checkpoint runner above.
+The run used the pre-versioning modernization source hash documented above and
+a precursor of the portable checkpoint runner. Its saved exact coefficients
+serve as a baseline for subsequent optimization work.
+
+After the follow-up optimizations, another checkpointed run from degree 12
+reproduced all **80,616 stored coefficients through degree 13** and all
+**149,061 through degree 14** exactly, including zeros. The new incremental
+timings were 126.0 seconds for degree 13 and 1,519.2 seconds (25.3 minutes) for
+degree 14. These are single checkpoint-run observations, not the repeated
+fresh-process benchmarks above. The improvement at degree 14 is modest
+compared with its earlier 26.8 minutes; the roughly twofold speedup at lower
+degrees does not persist here.
+
+The degree-14 run spent about 23.5 minutes before reporting its first completed
+mu partition. This identifies where further profiling is needed, rather than
+establishing a detailed cost breakdown. Peak process RSS was 681 MiB, including
+serialization and comparisons. Independent comparisons again passed for
+4,092 pairs at degree 13 and 5,577 at degree 14, using mu sizes at most 4.
+Those partial independent comparisons are distinct from the complete exact
+agreement with the saved baseline.
 
 ## Regression checks
 
@@ -254,3 +416,21 @@ and failed independent comparisons:
 ```sh
 MPLBACKEND=Agg python -m unittest discover -s tests
 ```
+
+Additional coverage guards the degree-10 exact hash, cached/uncached assembly
+equivalence, repeated Lie summands, decomposition order, lazy matrices, public
+input boundaries, plot controls, unique trajectories, Sage-free JSON/CLI
+operations, and explicit checkpoint migration.
+
+For local linting and formatting:
+
+```sh
+python -m pip install -e '.[dev]'
+ruff check .
+ruff format --check .
+```
+
+The legacy mathematical module is linted but excluded from whole-file
+reformatting to keep mathematical changes reviewable. CI checks the standard-
+library data tools separately and runs the full regression suite in the exact
+Linux Sage environment from `conda-linux-64.lock`.
