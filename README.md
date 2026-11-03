@@ -406,6 +406,33 @@ serialization and comparisons. Independent comparisons again passed for
 Those partial independent comparisons are distinct from the complete exact
 agreement with the saved baseline.
 
+### Download the degree-14 checkpoint
+
+The [published checkpoint](data/degree14/README.md) contains exact coefficients
+through degree 14 and the corresponding Sage checkpoint. Only those two
+payload files use Git LFS, totaling approximately **13.1 MiB**. The original
+report, checksums, and provenance documentation remain ordinary Git files.
+
+Install [Git LFS](https://git-lfs.com/) first, then run from a Git checkout:
+
+```sh
+git lfs install --local
+git lfs pull --include="data/degree14/coefficients.json,data/degree14/composition_factors.sobj"
+(cd data/degree14 && shasum -a 256 -c SHA256SUMS)
+python compute.py inspect data/degree14
+```
+
+Inspection needs no Sage and does not load pickle. Without the LFS download,
+the payload paths may contain small pointer files, not computation data.
+See the dataset README for JSON-only access, provenance, and trusted-checkpoint
+usage. This is an immutable snapshot: save new runs elsewhere rather than
+overwriting it.
+
+CI checks pointer structure without downloading the payloads. LFS storage and
+downloads count against the repository owner's allowance; each changed payload
+is stored as a complete new version. See
+[GitHub's LFS billing documentation](https://docs.github.com/en/billing/concepts/product-billing/git-lfs).
+
 ## Regression checks
 
 The regression suite covers the documented coefficient, degree-three matrix

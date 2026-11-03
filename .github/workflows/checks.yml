@@ -12,12 +12,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: python -m pip install -e '.[dev]'
       - run: ruff check .
       - run: ruff format --check .
+      - name: Check LFS pointers without downloading data
+        run: git lfs fsck --pointers
       - run: python -m unittest discover -s tests -p test_coefficient_data.py
       - run: composition-factors --help
   sage:
@@ -25,6 +29,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: false
       - uses: mamba-org/setup-micromamba@v2
         with:
           environment-name: composition-factors

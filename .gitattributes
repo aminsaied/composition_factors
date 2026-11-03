@@ -1,0 +1,4 @@
+data/degree14/coefficients.json filter=lfs diff=lfs merge=lfs -text
+data/degree14/composition_factors.sobj filter=lfs diff=lfs merge=lfs -text
+data/degree14/report.json text eol=lf
+data/degree14/SHA256SUMS text eol=lf
