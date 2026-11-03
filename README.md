@@ -152,7 +152,8 @@ PY
 ```
 
 The `resource` limit is an address-space ceiling, not a reservation of RAM.
-Each invocation computes all degrees up to the requested degree from scratch.
+Each invocation of this example computes all degrees up to the requested degree
+from scratch.
 If the timeout interrupts computation before `save`, no result for that run
 is saved; previously saved files remain available. Reload a completed result
 to plot it without repeating the computation.
@@ -169,11 +170,86 @@ A degree-14 attempt reached the ten-minute wall-time limit without a completed
 result. It was stopped by the configured timeout, with no reported out-of-memory
 event. This does not establish that degree 14 cannot finish with more time.
 
+### Checkpointed computations
+
+`compute.py` saves each completed degree before moving on. It uses the same
+per-degree algorithm as `CompositionFactors`, without generating plots:
+
+```sh
+python -u compute.py --degree 12 --output results/first-run
+python -u compute.py --degree 14 --resume results/first-run/degree12 \
+  --output results/resumed-run
+```
+
+The resumed run computes only degrees 13 and 14, saving them under
+`results/resumed-run/degree13` and `results/resumed-run/degree14`. Each checkpoint
+contains exact `coefficients.json`, a reloadable `composition_factors.sobj`, and
+`report.json` with counts, source/coefficient hashes, incremental timing, and
+peak process RSS. **Each timing measures the new degree only**, not a fresh
+computation through that degree. RSS is the peak of the current process.
+
+Use a **new output directory for each invocation**; existing directories are
+never overwritten. After an interruption, resume from the highest degree whose
+`report.json` was saved, using another output directory. Work within an
+unfinished degree is not resumed. Earlier checkpoints remain available even if
+a later computation or optional comparison fails.
+
+Only resume trusted checkpoints: `.sobj` uses pickle, and the hashes are
+integrity checks, not a security boundary. Resumption requires the same
+`composition_factors.py` source hash, matching coefficient data, and a
+successful save/load record. A checkpoint with a failed independent comparison
+is rejected. A pending comparison is reported as unfinished, not passed.
+
+For a bounded Linux run in the activated environment:
+
+```bash
+set -o pipefail
+mkdir -p results
+timeout --signal=TERM --kill-after=20s 7200 \
+  env MPLBACKEND=Agg OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  bash -ec 'ulimit -v 12582912; exec python -u compute.py \
+    --degree 14 --resume results/first-run/degree12 \
+    --output results/bounded-run' 2>&1 | tee results/bounded-run.log
+```
+
+This uses a two-hour total budget, a 20-second kill grace, and a 12 GiB
+virtual-address-space limit. The command runs in the foreground; use your
+scheduler or terminal multiplexer for an unattended job. Checkpoints and logs
+are ordinary local files, with no dependency on a particular cluster, account,
+or home directory.
+
+For an optional independent comparison, add `--reference`. This checks the full
+matrix at every newly computed degree and can be expensive. To compare only
+mu-partitions of sizes at most 4, add both `--reference` and
+`--reference-max-mu-size 4`; intermediate degrees use the smaller applicable
+bound. Reports record the actual number of pairs compared. A checkpoint is
+saved before this comparison, and a mismatch produces a nonzero exit.
+
+### Completed degree-14 run
+
+A subsequent two-hour-budget run successfully extended the saved degree-12
+result through degrees 13 and 14 on the same CPU host and environment. The new
+degree-13 computation took 202.5 seconds; degree 14 took 1,607.8 seconds
+(26.8 minutes). The whole resumed job, including imports, serialization, and
+comparisons, took 30 minutes 39 seconds. These are incremental timings, not
+fresh-process computations of all degrees through 13 or 14.
+
+The degree-14 result contains 507 partitions, **149,061 stored coefficients**
+and **56,557 nonzero coefficients**. Its full visualization matrix has
+**257,049 entries**, matching the thesis's reported degree-14 matrix size.
+Matching that size alone is not a comparison against the original dataset.
+Peak process RSS was 826 MiB. All 80,616 stored coefficients through degree 13
+were preserved. The independent comparison matched 5,577 pairs: all 507 lambda
+rows against the 11 mu-partitions of sizes 1 through 4, not the whole matrix.
+The run used the same mathematical source as this repository and a precursor
+of the portable checkpoint runner above.
+
 ## Regression checks
 
 The regression suite covers the documented coefficient, degree-three matrix
 and direct plethysm, save/load, independent instruction copies, decomposition
-iteration, and headless stability plots:
+iteration, headless stability plots, checkpoint resumption, integrity checks,
+and failed independent comparisons:
 
 ```sh
 MPLBACKEND=Agg python -m unittest discover -s tests
