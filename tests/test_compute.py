@@ -24,9 +24,7 @@ class CheckpointTests(unittest.TestCase):
 
     def make_checkpoint(self):
         directory = self.root / "checkpoint"
-        compute.save_checkpoint(
-            CompositionFactors(2), directory, 0.0, self.source_sha256
-        )
+        compute.save_checkpoint(CompositionFactors(2), directory, 0.0, self.source_sha256)
         return directory
 
     def test_resume_matches_fresh_computation_and_preserves_checkpoint(self):
@@ -34,10 +32,17 @@ class CheckpointTests(unittest.TestCase):
         compute.main(["--degree", "2", "--output", str(first)])
         checkpoint = first / "degree2"
         original = (checkpoint / "composition_factors.sobj").read_bytes()
-        compute.main([
-            "--degree", "4", "--output", str(second),
-            "--resume", str(checkpoint), "--reference",
-        ])
+        compute.main(
+            [
+                "--degree",
+                "4",
+                "--output",
+                str(second),
+                "--resume",
+                str(checkpoint),
+                "--reference",
+            ]
+        )
         self.assertTrue((first / "degree1" / "report.json").is_file())
         self.assertTrue((second / "degree3" / "report.json").is_file())
         self.assertFalse((second / "degree2").exists())
@@ -72,19 +77,31 @@ class CheckpointTests(unittest.TestCase):
         checkpoint = self.make_checkpoint()
         output = self.root / "invalid"
         with self.assertRaises(SystemExit):
-            compute.main([
-                "--degree", "2", "--resume", str(checkpoint),
-                "--output", str(output),
-            ])
+            compute.main(
+                [
+                    "--degree",
+                    "2",
+                    "--resume",
+                    str(checkpoint),
+                    "--output",
+                    str(output),
+                ]
+            )
         self.assertFalse(output.exists())
 
     def test_failed_comparison_is_recorded_and_blocks_resume(self):
         output = self.root / "failed"
         with patch("compute.compare_direct_plethysm", side_effect=ValueError("mismatch")):
             with self.assertRaisesRegex(ValueError, "mismatch"):
-                compute.main([
-                    "--degree", "1", "--output", str(output), "--reference",
-                ])
+                compute.main(
+                    [
+                        "--degree",
+                        "1",
+                        "--output",
+                        str(output),
+                        "--reference",
+                    ]
+                )
         checkpoint = output / "degree1"
         report = json.loads((checkpoint / "report.json").read_text())
         self.assertEqual(report["reference_status"], "failed")
@@ -97,6 +114,85 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(report["direct_plethysm_pairs_checked"], len(cf.coeffs))
         self.assertEqual(report["direct_plethysm_max_mu_size"], 1)
         self.assertEqual(report["reference_status"], "passed")
+
+    def test_checkpoint_does_not_force_visualization_matrix(self):
+        cf = CompositionFactors(3)
+        directory = self.root / "lazy"
+        report = compute.save_checkpoint(cf, directory, 0.0, self.source_sha256)
+        self.assertIsNone(cf._matrix)
+        self.assertEqual(report["matrix_entry_count"], 36)
+        self.assertEqual(report["format_version"], 1)
+        self.assertEqual(report["algorithm_version"], 1)
+
+    def test_checkpoint_checks_json_and_pickle_agree(self):
+        directory = self.make_checkpoint()
+        path = directory / "coefficients.json"
+        records = json.loads(path.read_text())
+        records[0]["multiplicity"] += 1
+        path.write_text(json.dumps(records))
+        with self.assertRaises(ValueError):
+            compute.load_checkpoint(directory, self.source_sha256)
+
+    def test_resume_rejects_unknown_algorithm_even_if_source_hash_matches(self):
+        directory = self.make_checkpoint()
+        path = directory / "report.json"
+        report = json.loads(path.read_text())
+        report["algorithm_version"] = 99
+        path.write_text(json.dumps(report))
+        with self.assertRaisesRegex(ValueError, "algorithm"):
+            compute.load_checkpoint(directory, self.source_sha256)
+
+    def test_explicit_migration_preserves_data_and_original_checkpoint(self):
+        directory = self.make_checkpoint()
+        path = directory / "report.json"
+        report = json.loads(path.read_text())
+        report["source_sha256"] = "a" * 64
+        path.write_text(json.dumps(report))
+        original = path.read_bytes()
+        output = self.root / "migrated"
+        compute.main(
+            [
+                "migrate",
+                str(directory),
+                "--output",
+                str(output),
+                "--reference-max-mu-size",
+                "2",
+            ]
+        )
+        restored = compute.load_checkpoint(output, self.source_sha256)
+        self.assertEqual(restored.coeffs, CompositionFactors(2).coeffs)
+        self.assertEqual(path.read_bytes(), original)
+        migrated = json.loads((output / "report.json").read_text())
+        self.assertEqual(migrated["coefficient_sha256"], report["coefficient_sha256"])
+        self.assertEqual(migrated["migration"]["source_sha256"], "a" * 64)
+        self.assertEqual(migrated["direct_plethysm_pairs_checked"], 9)
+
+    def test_migration_rejects_unknown_algorithms_and_unknown_legacy_sources(self):
+        directory = self.make_checkpoint()
+        path = directory / "report.json"
+        original = json.loads(path.read_text())
+        reports = [
+            {**original, "algorithm_version": 99},
+            {
+                key: ("a" * 64 if key == "source_sha256" else value)
+                for key, value in original.items()
+                if key not in ("algorithm_version", "format_version")
+            },
+        ]
+        for report in reports:
+            with self.subTest(report=report):
+                path.write_text(json.dumps(report))
+                with self.assertRaises(ValueError):
+                    compute.main(["migrate", str(directory), "--output", str(self.root / "no")])
+                self.assertFalse((self.root / "no").exists())
+
+    def test_compare_existing_checkpoint_does_not_modify_it(self):
+        directory = self.make_checkpoint()
+        before = {path.name: path.read_bytes() for path in directory.iterdir()}
+        compute.main(["compare", str(directory), "--reference-max-mu-size", "1"])
+        after = {path.name: path.read_bytes() for path in directory.iterdir()}
+        self.assertEqual(after, before)
 
 
 if __name__ == "__main__":

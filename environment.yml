@@ -7,3 +7,5 @@ dependencies:
   - sage=10.9
   - numpy
   - matplotlib-base
+  - pip
+  - setuptools>=77

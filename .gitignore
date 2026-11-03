@@ -2,3 +2,6 @@ __pycache__/
 *.py[cod]
 *.sobj
 /results/
+/build/
+/dist/
+/*.egg-info/

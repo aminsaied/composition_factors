@@ -1,7 +1,9 @@
 import os
 import tempfile
 import unittest
+from itertools import product
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("MPLBACKEND", "Agg")
 
@@ -11,8 +13,11 @@ from sage.all import Partition, QQ
 
 from composition_factors import (
     CompositionFactors,
+    CompositionFactorsAtDegree,
     Decomposition,
     Instruction,
+    Lie,
+    MuPartition,
     Visualisations,
     s,
 )
@@ -97,6 +102,135 @@ class CompositionFactorsTests(unittest.TestCase):
             )
         finally:
             plt.close(figure)
+
+    def test_structural_zero_and_invalid_queries(self):
+        self.assertEqual(self.cf.coeff([1], [2]), 0)
+        for lam, mu in (([4], [1]), ([1], [4]), ([], [1]), ([1], [])):
+            with self.subTest(lam=lam, mu=mu):
+                with self.assertRaisesRegex(ValueError, "partition|computed"):
+                    self.cf.coeff(lam, mu)
+
+    def test_positive_integer_degrees(self):
+        for constructor in (CompositionFactors, CompositionFactorsAtDegree, Lie):
+            for degree in (0, -1, 1.5, True):
+                with self.subTest(constructor=constructor.__name__, degree=degree):
+                    with self.assertRaises((TypeError, ValueError)):
+                        constructor(degree)
+
+    def test_matrix_is_lazy_and_save_does_not_construct_it(self):
+        cf = CompositionFactors(3)
+        self.assertIsNone(cf._matrix)
+        self.assertEqual(cf.coeff([2, 1], [1]), 1)
+        with tempfile.TemporaryDirectory() as directory:
+            filename = str(Path(directory) / "lazy")
+            cf.save(filename)
+            restored = CompositionFactors.load(filename)
+        self.assertIsNone(cf._matrix)
+        self.assertIsNone(restored._matrix)
+        np.testing.assert_array_equal(restored.matrix, self.cf.matrix)
+        self.assertIs(restored.matrix, restored.matrix)
+
+    def test_cached_and_uncached_assemblies_preserve_multiplicities(self):
+        cached = CompositionFactors(8)
+        uncached = CompositionFactors(8, cache_assemblies=False)
+        self.assertEqual(cached.coeffs, uncached.coeffs)
+        self.assertLess(len(set(Lie(8).as_list)), len(Lie(8).as_list))
+
+    def test_degree_ten_exact_regression_hash(self):
+        import hashlib
+        from compute import encode_coefficients
+
+        _, encoded = encode_coefficients(CompositionFactors(10))
+        self.assertEqual(
+            hashlib.sha256(encoded).hexdigest(),
+            "1813638dbb0ae6385ffb911cbb0b12b0071f604c6a8d03a55534f5e67ed3d504",
+        )
+
+    def test_requested_decomposition_shape_is_lazy_and_order_preserving(self):
+        from sage.all import Partitions
+
+        mu = MuPartition([3, 2, 1])
+        shape = Partition([2, 2, 1, 1])
+        expected = []
+        for combo in product(*(Partitions(size, outer=mu.partition) for size in shape)):
+            ordered = tuple(sorted(combo, key=lambda part: (sum(part), len(part)), reverse=True))
+            if ordered not in expected:
+                expected.append(ordered)
+        actual = mu.decompositions_for(shape)
+        self.assertEqual([item.partitions_tuple for item in actual], expected)
+        self.assertEqual(set(mu._decompositions), {shape})
+        self.assertIs(actual, mu.decompositions_for(shape))
+        self.assertEqual(set(mu.decompositions), set(mu.shapes))
+
+    def test_one_lie_object_is_shared_by_degree_and_lookup(self):
+        with patch("composition_factors.Lie._lie", wraps=Lie._lie) as character:
+            degree = CompositionFactorsAtDegree(6)
+        self.assertIs(degree.lie, degree.lookup.lie)
+        self.assertEqual(character.call_count, 6)
+        self.assertEqual(degree.lie.sizes_up_to(0), [])
+        self.assertEqual(degree.lie.count_up_to(4), 5)
+
+    def test_progress_counts_completed_mu_partitions(self):
+        events = []
+        CompositionFactorsAtDegree(4, progress=events.append)
+        completed = [event for event in events if event["stage"] == "coefficients"]
+        self.assertEqual([event["completed"] for event in completed], list(range(1, 7)))
+        self.assertTrue(all(event["total"] == 6 for event in completed))
+
+    def test_ticks_are_hidden_or_grouped_by_degree(self):
+        for ticks in (False, "degree"):
+            figure = self.cf.display(ticks=ticks, width=3)
+            try:
+                axis = figure.axes[0]
+                if ticks is False:
+                    self.assertEqual(len(axis.get_xticks()), 0)
+                    self.assertEqual(len(axis.get_yticks()), 0)
+                else:
+                    self.assertEqual(
+                        [label.get_text() for label in axis.get_xticklabels()], ["1", "2", "3"]
+                    )
+            finally:
+                plt.close(figure)
+
+    def test_palette_normalization_and_plot_input_validation(self):
+        from matplotlib.colors import LogNorm
+
+        before = self.cf.matrix.copy()
+        figure = self.cf.display(cmap="historical", normalization="log", width=3)
+        try:
+            image = figure.axes[0].images[0]
+            self.assertEqual(image.cmap.N, 256)
+            self.assertIsInstance(image.norm, LogNorm)
+        finally:
+            plt.close(figure)
+        np.testing.assert_array_equal(self.cf.matrix, before)
+        for kwargs in (
+            {"ticks": "invalid"},
+            {"normalization": "invalid"},
+            {"resolution": 0},
+            {"width": -1},
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    self.cf.display(**kwargs)
+
+    def test_unique_stability_sequences_keep_earliest_eligible_chain(self):
+        vis = Visualisations(self.cf)
+        sequences = vis.stability_sequences("PD", unique=True)
+        diagonal = [item for item in sequences if item["lambda"] == (1,) and item["mu"] == (1,)]
+        self.assertEqual(len(diagonal), 1)
+        self.assertEqual(diagonal[0]["sizes"], [2, 4, 6])
+        self.assertEqual(diagonal[0]["coefficients"], [1, 1, 1])
+        self.assertFalse(any(item["lambda"] == (2,) and item["mu"] == (2,) for item in sequences))
+        figure = vis.PD_stability(unique=True, width=3)
+        try:
+            self.assertEqual(len(figure.axes[0].lines), len(sequences))
+        finally:
+            plt.close(figure)
+        with self.assertRaises(ValueError):
+            vis.stability_sequences("unknown")
+        with self.assertRaises(ValueError):
+            vis.stability_sequences(seq_length=0)
 
 
 if __name__ == "__main__":
