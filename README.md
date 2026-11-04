@@ -518,7 +518,8 @@ integers; floats and booleans are rejected rather than coerced.
 Twisted Lie characters and individual plethysms are cached for each calculator
 instance's lifetime. This is a small-degree reference implementation, not an
 optimized replacement for large composition-factor runs. There is no
-checkpoint-degree limit, but higher-degree runtime has not been established.
+checkpoint-degree limit. A complete run through degree 14 is published below;
+runtime beyond degree 14 has not been established.
 The characteristic-zero and positive-rank restrictions remain unchanged;
 rank-zero conventions, chain-level representatives, and Lean proofs are
 outside this interface.
@@ -532,12 +533,12 @@ hash or the composition-factor algorithm version. Calculated CSV starts with
 `block_type,characteristic,convention,calculation,calculation_version,source_sha256,sage`.
 An empty CSV `block_type` means total; an empty `mu` means ordinary.
 The existing lookup CSV columns are unchanged. Neither kind of derived output
-is a resumable composition-factor checkpoint, and no second canonical dataset
-is maintained.
+is a resumable composition-factor checkpoint. Published Whitney outputs are
+kept separately from the single canonical composition-factor checkpoint.
 
 The reference calculation has been checked against the corrected checkpoint
-for all 28 positive-rank bidegrees through degree 8: 350 ordinary and 1,719
-extended total multiplicities, including zeros. All 58 block-size profiles
+for all 91 positive-rank bidegrees through degree 14: 5,342 ordinary and 107,988
+extended total multiplicities, including zeros. All 493 block-size profiles
 in that range were checked for type sums, ordinary invariants, and dimensions
 $n!/\prod_j(j^{m_j}m_j!)$ (ordinary) and $i!$ times that value (extended).
 The two block types at degree four and two blocks were also checked against
@@ -678,6 +679,20 @@ CI checks pointer structure without downloading the payloads. LFS storage and
 downloads count against the repository owner's allowance; each changed payload
 is stored as a complete new version. See
 [GitHub's LFS billing documentation](https://docs.github.com/en/billing/concepts/product-billing/git-lfs).
+
+## Published Whitney calculations
+
+The complete ordinary/extended totals and type-selected calculations through
+degree 14 are in [`data/whitney-degree14`](data/whitney-degree14/README.md).
+The Git LFS JSONL payload contains 1,168 decompositions and 637,564 coefficient
+records, including zeros. The full calculation and validation took 46.47
+seconds on the existing Sage 10.9 CPU environment; degree 14 accounted for
+28.30 seconds. These timings describe this Whitney run, not the earlier
+composition-factor algorithm.
+
+The directory includes the exact source/provenance report, checksums, and
+reproduction script. It uses a distinct derived-output schema, not a second
+version of the composition-factor checkpoint.
 
 ## Regression checks
 
