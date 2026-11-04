@@ -19,7 +19,7 @@ dev = ["ruff==0.16.0"]
 composition-factors = "compute:entrypoint"
 
 [tool.setuptools]
-py-modules = ["composition_factors", "coefficient_data", "compute"]
+py-modules = ["composition_factors", "coefficient_data", "whitney_data", "whitney_calculation", "compute"]
 
 [tool.ruff]
 line-length = 100

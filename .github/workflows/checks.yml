@@ -22,7 +22,7 @@ jobs:
       - run: ruff format --check .
       - name: Check LFS pointers without downloading data
         run: git lfs fsck --pointers
-      - run: python -m unittest discover -s tests -p test_coefficient_data.py
+      - run: python -m unittest discover -s tests -p 'test_*data.py'
       - run: composition-factors --help
   sage:
     runs-on: ubuntu-latest

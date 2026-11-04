@@ -4,11 +4,14 @@ Computes the composition factors of the n-th tensor power of the free
 associative algebra in terms of coefficients `cf[lambda_][mu]` indexing the
 terms in the irreducible decomposition.
 
-This file implements:
+This repository provides:
 
 - A fast algorithm computing the coefficients `cf[lambda_][mu]` for partitions `lambda_`, `mu`.
 - A data-structure `Lie` capturing the representation theory of the free Lie algebra.
 - Visualisations of the composition factors and certain stability phenomena.
+- Sage-free total Whitney multiplicities from existing coefficients.
+- Independent Sage calculations of ordinary and extended Whitney homology,
+  optionally selected by block-size profile.
 
 There is a [white paper](https://arxiv.org/abs/1711.04326) describing this algorithm on the arXiv.
 
@@ -62,8 +65,9 @@ composition-factors --help
 ```
 
 SageMath must still be installed separately for computations and plots. Help,
-checkpoint inspection, exact queries, and CSV export use only Python's standard
-library and can also run directly as `python compute.py ...` without Sage.
+checkpoint inspection, exact queries, checkpoint CSV export, and the derived
+Whitney views use only Python's standard library and can also run directly as
+`python compute.py ...` without Sage.
 
 ## Examples
 
@@ -356,6 +360,190 @@ The partial comparison is not a proof of all coefficients. Unknown legacy
 sources or algorithm versions are rejected rather than overridden. Original
 files are untouched, and migration reads no pickle.
 
+### Whitney homology from existing coefficients
+
+The `whitney` commands provide **total ordinary and extended Whitney
+multiplicities**, derived from the validated composition-factor checkpoint.
+They do not run Sage, load pickle, modify the checkpoint, or create a second
+canonical dataset. The supplied checkpoint supports these queries through
+degree 14.
+
+Work in characteristic zero. Here `degree` is the underlying set size `n`,
+`blocks` is the number of blocks `i`, and the lattice rank is `n - i`.
+The interface supports only **positive rank**, `1 <= i < n`. Rank zero
+(`i = n`), empty partitions, zero blocks, and degrees outside the checkpoint
+raise errors rather than silently selecting a bottom convention or returning
+zero. A zero multiplicity within the supported domain remains an exact zero.
+
+For partitions $\lambda\vdash n$ and $\mu\vdash i$, the extended multiplicity of
+$P_\mu\otimes P_\lambda$ is
+
+$$
+d_{\lambda,\mu}=c_{\lambda',\mu'}.
+$$
+
+Both labels are conjugated; the matrix axes are not transposed. This is the
+total-character consequence of the sign twists in
+[the thesis](https://hdl.handle.net/1813/64873), Definition 6.2.16 and
+Theorem 6.2.19. Taking the trivial block-action component, $\mu=(i)$, gives
+ordinary Whitney homology (Lemma 6.2.15):
+
+$$
+[P_\lambda:WH_{i,n}]=d_{\lambda,(i)}=c_{\lambda',(1^i)}.
+$$
+
+```sh
+# Ordinary multiplicity: prints 2.
+python compute.py whitney query data/degree14 --lambda 3,1 --blocks 2
+# Extended multiplicity: prints 1 for the sign representation of the block action.
+python compute.py whitney query data/degree14 --lambda 3,1 --mu 1,1
+# Ordinary decomposition with zero terms omitted.
+python compute.py whitney decompose data/degree14 --degree 4 --blocks 2 --nonzero
+# Derived JSON and CSV files; each output path must be new.
+python compute.py whitney export data/degree14 --degree 4 --blocks 2 \
+  --format json --output whitney-4-2.json --nonzero
+python compute.py whitney export data/degree14 --degree 4 --blocks 2 --extended \
+  --format csv --output extended-whitney-4-2.csv
+```
+
+`query` requires exactly one of `--blocks` (ordinary) and `--mu` (extended).
+`decompose` and `export` default to ordinary; `--extended` includes both
+partition labels. All multiplicities, including zeros, are returned by default;
+`--nonzero` omits zeros. For example, the ordinary decomposition above is
+$2P_{(3,1)}\oplus P_{(2,2)}\oplus P_{(2,1,1)}$, of dimension 11.
+
+The standard-library API is:
+
+```python
+from pathlib import Path
+from coefficient_data import read_checkpoint
+from whitney_data import WhitneyData
+
+whitney = WhitneyData(read_checkpoint(Path("data/degree14")))
+whitney.ordinary_coeff([3, 1], blocks=2)  # 2
+whitney.extended_coeff([3, 1], [1, 1])  # 1
+result = whitney.decomposition(4, 2, extended=True, nonzero=True)
+```
+
+JSON output includes `kind`, `degree`, `blocks`, `rank`, characteristic-zero and
+positive-rank conventions, the source checkpoint's degree/algorithm/hash, and
+exact integer `coefficients`. Ordinary records have `lambda` and `multiplicity`;
+extended records additionally have `mu`. This version-1 **derived-output**
+schema is not a composition-factor checkpoint and cannot be resumed or migrated.
+CSV columns are `kind`, `degree`, `blocks`, `rank`, `lambda`, `mu`,
+`multiplicity`, and `source_coefficient_sha256`. Partitions are comma-separated
+and CSV-quoted; `mu` is empty for ordinary coefficients.
+
+This lookup layer implements the relabeling formula, not a chain complex or
+Lean proof. Contributions from individual block-size profiles cannot be
+recovered from the aggregate table. Use the independent calculation below
+when those contributions, or a calculation without a checkpoint, are needed.
+
+### Computing Whitney homology directly
+
+`whitney compute` uses **SageMath**, but needs **no checkpoint**. It calculates
+ordinary or extended Whitney multiplicities from the signed-plethysm formulas
+in the thesis, Theorem 6.2.19 and Remark 6.2.21. It does not import the
+composition-factor engine or reuse its decomposition/assembly algorithm.
+
+Run these commands with the activated Sage environment's `python`:
+
+```sh
+# Ordinary contribution from set partitions having two blocks of size two.
+python compute.py whitney compute --degree 4 --blocks 2 --type 2,2 --nonzero
+# Extended contribution from block sizes three, two, and one.
+python compute.py whitney compute --degree 6 --blocks 3 --type 3,2,1 \
+  --extended --nonzero
+# Total extended homology: sum all block-size profiles with four blocks.
+python compute.py whitney compute --degree 8 --blocks 4 --extended
+# Save an exact type-selected result; both flags are required for file output.
+python compute.py whitney compute --degree 6 --blocks 3 --type 3,2,1 \
+  --extended --format json --output whitney-6-type-321.json
+python compute.py whitney compute --degree 6 --blocks 3 --type 3,2,1 \
+  --extended --format csv --output whitney-6-type-321.csv
+```
+
+`--type` is a weakly decreasing list of block sizes, **not** an irreducible
+representation label. Its parts must sum to `--degree`, and its length must
+equal `--blocks`. Omitting it sums all such profiles. Ordinary is the default;
+`--extended` includes both `lambda` (the underlying-set action) and `mu` (the
+block action). Zeros are included unless `--nonzero` is specified. Without
+`--output` and `--format`, the result is printed as JSON. Existing files are
+never overwritten.
+
+For example, the ordinary contributions at degree four and two blocks are
+
+$$
+WH_{(3,1)} = P_{(3,1)} \oplus P_{(2,2)} \oplus P_{(2,1,1)},\qquad
+WH_{(2,2)} = P_{(3,1)}.
+$$
+
+Their sum is the total decomposition above. For the extended contribution
+of type $(2,2)$, the trivial block representation pairs with $P_{(3,1)}$,
+whereas the sign block representation pairs with $P_{(4)}\oplus P_{(2,2)}$.
+This distinction checks the sign associated with exchanging equal even-sized
+blocks; a dimension check alone cannot detect the wrong sign.
+
+The calculation first builds $\widehat{\mathrm{Lie}}_j=\omega(\mathrm{Lie}_j)$
+from the exact power-sum Mobius formula. For a profile
+$\rho=1^{m_1}2^{m_2}\cdots$, ordinary homology has character
+
+$$
+\operatorname{ch}(WH_\rho)
+=\prod_{j\ \mathrm{odd}} h_{m_j}[\widehat{\mathrm{Lie}}_j]\,
+ \prod_{j\ \mathrm{even}} e_{m_j}[\widehat{\mathrm{Lie}}_j].
+$$
+
+For extended homology, enumerate $\nu_j\vdash m_j$. The coefficient of $s_\mu$
+in $\prod_j s_{\nu_j}$ gives the block-restriction multiplicity. Multiply the
+ambient factors $s_{\nu_j}[\widehat{\mathrm{Lie}}_j]$, conjugating $\nu_j$ only
+when $j$ is even, and accumulate with that multiplicity. The block-action
+factor uses the original $\nu_j$, not its even-index conjugate.
+
+The Sage API is:
+
+```python
+from pathlib import Path
+from whitney_calculation import WhitneyCalculator
+
+calculator = WhitneyCalculator()
+result = calculator.decomposition(6, 3, block_type=[3, 2, 1], extended=True)
+calculator.export_json(Path("whitney-6-type-321.json"), 6, 3, block_type=[3, 2, 1], extended=True)
+```
+
+The calculator also accepts Sage integers and a Sage `Partition` as the
+block-size profile. Returned labels and multiplicities are ordinary Python
+integers; floats and booleans are rejected rather than coerced.
+
+Twisted Lie characters and individual plethysms are cached for each calculator
+instance's lifetime. This is a small-degree reference implementation, not an
+optimized replacement for large composition-factor runs. There is no
+checkpoint-degree limit, but higher-degree runtime has not been established.
+The characteristic-zero and positive-rank restrictions remain unchanged;
+rank-zero conventions, chain-level representatives, and Lean proofs are
+outside this interface.
+
+Calculated JSON retains the version-1 derived-output envelope and record
+conventions, with `calculation: "signed_plethysm"` and a `block_type` list
+(`null` for totals). Its `source` contains the **Whitney** `algorithm_version`
+(currently 1), calculator `source_sha256`, and `sage` version, not a checkpoint
+hash or the composition-factor algorithm version. Calculated CSV starts with
+`kind,degree,blocks,rank,lambda,mu,multiplicity`, followed by
+`block_type,characteristic,convention,calculation,calculation_version,source_sha256,sage`.
+An empty CSV `block_type` means total; an empty `mu` means ordinary.
+The existing lookup CSV columns are unchanged. Neither kind of derived output
+is a resumable composition-factor checkpoint, and no second canonical dataset
+is maintained.
+
+The reference calculation has been checked against the corrected checkpoint
+for all 28 positive-rank bidegrees through degree 8: 350 ordinary and 1,719
+extended total multiplicities, including zeros. All 58 block-size profiles
+in that range were checked for type sums, ordinary invariants, and dimensions
+$n!/\prod_j(j^{m_j}m_j!)$ (ordinary) and $i!$ times that value (extended).
+The two block types at degree four and two blocks were also checked against
+actual interval homology on all 48 elements of $S_2\times S_4$, separately
+for each type. These are numerical character checks, not formal Lean proofs.
+
 ### Exact JSON format
 
 New reports declare `format_version: 1` and `algorithm_version: 2`. The former
@@ -506,7 +694,19 @@ Additional coverage guards the degree-10 exact hash, cached/uncached assembly
 equivalence, repeated Lie summands, canonical decomposition order (including
 distinct partitions tied in size and length), dimension identities, lazy
 matrices, public input boundaries, plot controls, unique trajectories,
-Sage-free JSON/CLI operations, and explicit checkpoint migration.
+Sage-free JSON/CLI operations, and explicit checkpoint migration. Whitney
+coverage includes conjugation of both labels, ordinary/extended agreement,
+small decompositions, positive-rank boundaries, exact JSON/CSV outputs, and
+source preservation. The standard-library cases can run without Sage:
+
+```sh
+python -m unittest discover -s tests -p 'test_*data.py'
+```
+
+Sage-only Whitney cases cover type-selected examples, even-block sign twists,
+total agreement and type dimensions through degree six, independent rank-two
+interval characters, checkpoint-free CLI calculations, and exact exports.
+These cases are included in the full suite, not the standard-library subset.
 
 For local linting and formatting:
 
