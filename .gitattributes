@@ -1,4 +1,9 @@
 data/degree14/coefficients.json filter=lfs diff=lfs merge=lfs -text
 data/degree14/composition_factors.sobj filter=lfs diff=lfs merge=lfs -text
 data/degree14/report.json text eol=lf
+data/degree14/run.json text eol=lf
+data/degree14/corrections.json text eol=lf
 data/degree14/SHA256SUMS text eol=lf
+data/whitney-degree14/decompositions.jsonl filter=lfs diff=lfs merge=lfs -text
+data/whitney-degree14/report.json text eol=lf
+data/whitney-degree14/SHA256SUMS text eol=lf

@@ -16,6 +16,7 @@ from composition_factors import (
     CompositionFactorsAtDegree,
     Decomposition,
     Instruction,
+    InstructionManual,
     Lie,
     MuPartition,
     Visualisations,
@@ -161,6 +162,35 @@ class CompositionFactorsTests(unittest.TestCase):
         self.assertEqual(set(mu._decompositions), {shape})
         self.assertIs(actual, mu.decompositions_for(shape))
         self.assertEqual(set(mu.decompositions), set(mu.shapes))
+
+    def test_equal_size_and_length_partitions_have_one_decomposition_order(self):
+        mu = MuPartition([5, 3])
+        first, second = Partition([3, 1]), Partition([2, 2])
+        decompositions = mu.decompositions_for(Partition([4, 4]))
+        unordered = [tuple(sorted(item.partitions_tuple, reverse=True)) for item in decompositions]
+        self.assertEqual(len(unordered), len(set(unordered)))
+        matching = [item for item in decompositions if set(item) == {first, second}]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0].partitions_tuple, (first, second))
+        self.assertEqual(matching[0].overcount, 1)
+        repeated = [item for item in decompositions if tuple(item) == (first, first)]
+        self.assertEqual(len(repeated), 1)
+        self.assertEqual(repeated[0].overcount, QQ(1) / 2)
+
+    def test_tied_decomposition_assembly_counts_each_assignment_once(self):
+        mu = MuPartition([5, 3])
+        first, second = Partition([3, 1]), Partition([2, 2])
+        lie = Lie(2)
+        manual = InstructionManual(Partition([4, 4]), lie.sizes, 12)
+        actual = sum(
+            mu.lr_coeff(item) * item.overcount * manual.assemble(item, lie)
+            for item in mu.decompositions_for(Partition([4, 4]))
+            if set(item) == {first, second}
+        )
+        expected = s(first) * s(second).plethysm(s([1, 1])) + s(second) * s(first).plethysm(
+            s([1, 1])
+        )
+        self.assertEqual(actual, expected)
 
     def test_one_lie_object_is_shared_by_degree_and_lookup(self):
         with patch("composition_factors.Lie._lie", wraps=Lie._lie) as character:

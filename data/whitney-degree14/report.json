@@ -1,0 +1,104 @@
+{
+  "format": "whitney-decompositions-jsonl",
+  "format_version": 1,
+  "status": "passed",
+  "maximum_degree": 14,
+  "characteristic": 0,
+  "convention": "positive_rank",
+  "started_at": "2026-11-04T06:21:30.472929+00:00",
+  "calculator_commit": "a2220f6765d8018c8fcc89103994441cba6c29d8",
+  "reference_coefficient_sha256": "effb854ea250df454c0fb5d20390825d0457ef5385a0e7dca7c6b000959072e3",
+  "source_file_sha256": {
+    "whitney_calculation.py": "8b0462faffbc962d39430073a56b7b71694c47438aaf07a435dfd8933a5684d7",
+    "whitney_data.py": "8797108957d209c66a7583a57686b70416909ef3a35b077cb7e36c3cb7d4042f",
+    "coefficient_data.py": "4c0bf7806802582cfb3056ca8a74ad9cffb26f3a546a6b369d24fb4ff198f36b",
+    "data/whitney-degree14/generate.py": "b66bcb1292cc4dba9a280fe9c9fffdcb6516ee8761e7234be655365cf4314770"
+  },
+  "bidegrees": 91,
+  "block_types": 493,
+  "decompositions": 1168,
+  "stored_coefficients": 637564,
+  "nonzero_coefficients": 414782,
+  "ordinary_total_coefficients_checked": 5342,
+  "extended_total_coefficients_checked": 107988,
+  "type_dimension_checks": 986,
+  "type_invariant_coefficients_checked": 40566,
+  "degrees": [
+    {
+      "degree": 2,
+      "seconds": 0.04929126286879182,
+      "cumulative_decompositions": 4
+    },
+    {
+      "degree": 3,
+      "seconds": 0.0032419757917523384,
+      "cumulative_decompositions": 12
+    },
+    {
+      "degree": 4,
+      "seconds": 0.007387502118945122,
+      "cumulative_decompositions": 26
+    },
+    {
+      "degree": 5,
+      "seconds": 0.010941084939986467,
+      "cumulative_decompositions": 46
+    },
+    {
+      "degree": 6,
+      "seconds": 0.0293174940161407,
+      "cumulative_decompositions": 76
+    },
+    {
+      "degree": 7,
+      "seconds": 0.045230722054839134,
+      "cumulative_decompositions": 116
+    },
+    {
+      "degree": 8,
+      "seconds": 0.17803836101666093,
+      "cumulative_decompositions": 172
+    },
+    {
+      "degree": 9,
+      "seconds": 0.255603636149317,
+      "cumulative_decompositions": 246
+    },
+    {
+      "degree": 10,
+      "seconds": 0.7276366879232228,
+      "cumulative_decompositions": 346
+    },
+    {
+      "degree": 11,
+      "seconds": 1.6933831851929426,
+      "cumulative_decompositions": 476
+    },
+    {
+      "degree": 12,
+      "seconds": 4.489821149967611,
+      "cumulative_decompositions": 650
+    },
+    {
+      "degree": 13,
+      "seconds": 10.645086923148483,
+      "cumulative_decompositions": 874
+    },
+    {
+      "degree": 14,
+      "seconds": 28.295532363001257,
+      "cumulative_decompositions": 1168
+    }
+  ],
+  "current": {
+    "degree": 14,
+    "blocks": 13
+  },
+  "payload": {
+    "file": "decompositions.jsonl",
+    "sha256": "d5b6a3409f74618d8be20185a4dccfc88f109a0191bcc7c06565470021954ed9",
+    "bytes": 35729238
+  },
+  "completed_at": "2026-11-04T06:22:16.941133+00:00",
+  "seconds": 46.468234938103706
+}

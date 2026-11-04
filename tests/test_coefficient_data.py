@@ -69,6 +69,26 @@ class CoefficientDataTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "hash"):
             read_checkpoint(self.root)
 
+    def test_dimension_identity_checks_every_degree_and_column(self):
+        self.assertEqual(read_checkpoint(self.root).validate_dimensions(), 10)
+
+    def test_rejects_incorrect_dimension_comparison_count(self):
+        for count in (9, True):
+            with self.subTest(count=count):
+                self.report["dimension_columns_checked"] = count
+                self.write_checkpoint()
+                with self.assertRaisesRegex(ValueError, "dimension comparison count"):
+                    read_checkpoint(self.root)
+
+    def test_rejects_overcount_even_with_consistent_hash_and_record_counts(self):
+        record = next(
+            row for row in self.records if row["lambda"] == [2, 1] and row["mu"] == [1, 1]
+        )
+        record["multiplicity"] += 1
+        self.write_checkpoint()
+        with self.assertRaisesRegex(ValueError, "dimension.*degree 3.*expected"):
+            read_checkpoint(self.root)
+
     def test_rejects_duplicate_missing_and_invalid_records_even_with_matching_hash(self):
         original = list(self.records)
         variants = [

@@ -1,4 +1,4 @@
-"""Compute, inspect, query, export, compare, migrate, and plot exact coefficients."""
+"""Compute and inspect exact composition factors and Whitney homology multiplicities."""
 
 import argparse
 import hashlib
@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from importlib.metadata import version
 from pathlib import Path
 
-from coefficient_data import FORMAT_VERSION, encode_records, read_checkpoint
+from coefficient_data import CoefficientData, FORMAT_VERSION, encode_records, read_checkpoint
 
 LEGACY_SOURCE_SHA256 = "3f6234d0539e7bca6fa4548416c6b728bb2807666b27c1b1d924e8ec8dc8241b"
 
@@ -109,8 +109,13 @@ def save_checkpoint(cf, directory, elapsed, source_sha256, reference_pending=Fal
     from composition_factors import ALGORITHM_VERSION, CompositionFactors
 
     directory = Path(directory)
-    directory.mkdir()
     records, encoded = encode_coefficients(cf)
+    rows = {
+        tuple(map(int, lam)): {tuple(map(int, mu)): int(value) for mu, value in row.items()}
+        for lam, row in cf.coeffs.items()
+    }
+    dimension_columns = CoefficientData(int(cf.top_degree), rows, {}).validate_dimensions()
+    directory.mkdir()
     (directory / "coefficients.json").write_bytes(encoded + b"\n")
     cf.save(str(directory / "composition_factors"))
     restored = CompositionFactors.load(str(directory / "composition_factors"))
@@ -140,6 +145,7 @@ def save_checkpoint(cf, directory, elapsed, source_sha256, reference_pending=Fal
         "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "save_load_equal": True,
         "reference_status": "pending" if reference_pending else "not_requested",
+        "dimension_columns_checked": dimension_columns,
         "process_peak_rss_mib": peak_rss_mib(),
     }
     write_report(directory / "report.json", report)
@@ -175,15 +181,18 @@ def compare_direct_plethysm(cf, max_mu_size=None):
             (rho, coefficient) for rho, coefficient in polynomial if sum(rho) <= degree
         )
 
+    power_images = {}
     checked = 0
     for size in range(1, max_mu + 1):
         for mu in Partitions(size):
             polynomial = p.zero()
             for rho, coefficient in p(s(mu)):
-                term = p.one()
-                for k in rho:
-                    term = truncate(term * substitutions[k])
-                polynomial += coefficient * term
+                if rho not in power_images:
+                    term = p.one()
+                    for k in rho:
+                        term = truncate(term * substitutions[k])
+                    power_images[rho] = term
+                polynomial += coefficient * power_images[rho]
             expected = s(polynomial).monomial_coefficients()
             for lam, row in cf.coeffs.items():
                 actual = row.get(mu, 0)
@@ -301,6 +310,54 @@ def make_parser():
             command.add_argument(
                 "--unique", action="store_true", help="Omit stability-chain suffixes."
             )
+    whitney = commands.add_parser(
+        "whitney", help="Look up Whitney coefficients without Sage, or calculate them with Sage."
+    )
+    actions = whitney.add_subparsers(dest="whitney_command", required=True)
+    for name, help_text in (
+        ("query", "Look up one ordinary or extended Whitney multiplicity."),
+        ("decompose", "Print a Whitney decomposition and provenance as JSON."),
+        ("export", "Export a Whitney decomposition to a new JSON or CSV file."),
+    ):
+        command = actions.add_parser(name, help=help_text)
+        command.add_argument("checkpoint", type=Path)
+        if name == "query":
+            command.add_argument("--lambda", dest="lambda_", type=parse_partition, required=True)
+            selector = command.add_mutually_exclusive_group(required=True)
+            selector.add_argument("--blocks", type=int, help="Block count for ordinary Whitney.")
+            selector.add_argument(
+                "--mu", type=parse_partition, help="Partition labeling the extended block action."
+            )
+        else:
+            command.add_argument("--degree", type=int, required=True, help="Underlying set size.")
+            command.add_argument(
+                "--blocks",
+                type=int,
+                required=True,
+                help="Block count; lattice rank is degree - blocks.",
+            )
+            command.add_argument(
+                "--extended", action="store_true", help="Include both group labels."
+            )
+            command.add_argument("--nonzero", action="store_true", help="Omit zero multiplicities.")
+        if name == "export":
+            command.add_argument("--output", type=Path, required=True, help="New output file.")
+            command.add_argument("--format", choices=("json", "csv"), required=True)
+    calculation = actions.add_parser(
+        "compute", help="Calculate total or type-selected Whitney coefficients with Sage."
+    )
+    calculation.add_argument("--degree", type=int, required=True, help="Underlying set size.")
+    calculation.add_argument("--blocks", type=int, required=True, help="Number of blocks.")
+    calculation.add_argument(
+        "--type",
+        dest="block_type",
+        type=parse_partition,
+        help="Block-size profile, e.g. 3,1; defaults to summing all profiles.",
+    )
+    calculation.add_argument("--extended", action="store_true", help="Include both group labels.")
+    calculation.add_argument("--nonzero", action="store_true", help="Omit zero multiplicities.")
+    calculation.add_argument("--output", type=Path, help="New output file; requires --format.")
+    calculation.add_argument("--format", choices=("json", "csv"), help="Requires --output.")
     return parser
 
 
@@ -364,8 +421,13 @@ def migrate_checkpoint(data, output, max_mu_size):
     if algorithm is None:
         if data.report["source_sha256"] != LEGACY_SOURCE_SHA256:
             raise ValueError("Migration requires a recognized legacy source or algorithm version.")
-    elif type(algorithm) is not int or algorithm != ALGORITHM_VERSION:
+    elif type(algorithm) is not int or algorithm not in (1, ALGORITHM_VERSION):
         raise ValueError(f"Unsupported checkpoint algorithm version: {algorithm!r}.")
+    if algorithm in (None, 1) and data.degree >= 12:
+        raise ValueError(
+            "The historical algorithm can overcount from degree 12 onward. "
+            "Recompute from a checkpoint through degree 11 or use corrected data."
+        )
     cf = from_exact_data(data)
     comparison = compare_direct_plethysm(cf, max_mu_size)
     _, encoded = encode_coefficients(cf)
@@ -421,6 +483,58 @@ def plot_checkpoint(data, args):
         plt.close(figure)
 
 
+def run_whitney(data, args):
+    from whitney_data import WhitneyData
+
+    whitney = WhitneyData(data)
+    if args.whitney_command == "query":
+        value = (
+            whitney.ordinary_coeff(args.lambda_, args.blocks)
+            if args.blocks is not None
+            else whitney.extended_coeff(args.lambda_, args.mu)
+        )
+        print(value)
+    elif args.whitney_command == "decompose":
+        result = whitney.decomposition(
+            args.degree, args.blocks, extended=args.extended, nonzero=args.nonzero
+        )
+        print(json.dumps(result, indent=2))
+    else:
+        export = whitney.export_json if args.format == "json" else whitney.export_csv
+        export(args.output, args.degree, args.blocks, extended=args.extended, nonzero=args.nonzero)
+
+
+def run_whitney_calculation(args, parser):
+    from whitney_data import validate_whitney_request, write_whitney_csv, write_whitney_json
+
+    validate_whitney_request(args.degree, args.blocks, args.block_type)
+    if (args.output is None) != (args.format is None):
+        parser.error("--output and --format must be supplied together")
+    if args.output is not None and args.output.exists():
+        raise FileExistsError(f"Output file already exists: {args.output}")
+    try:
+        from whitney_calculation import WhitneyCalculator
+    except ModuleNotFoundError as error:
+        if error.name not in ("sage", "sage.all"):
+            raise
+        raise ValueError(
+            "Whitney calculations require SageMath. Run this command with Sage's Python; "
+            "whitney query/decompose/export can use an existing checkpoint without Sage."
+        ) from error
+    result = WhitneyCalculator().decomposition(
+        args.degree,
+        args.blocks,
+        block_type=args.block_type,
+        extended=args.extended,
+        nonzero=args.nonzero,
+    )
+    if args.output is None:
+        print(json.dumps(result, indent=2))
+    else:
+        writer = write_whitney_json if args.format == "json" else write_whitney_csv
+        writer(result, args.output)
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0].startswith("-") and argv[0] not in ("-h", "--help"):
@@ -433,6 +547,9 @@ def main(argv=None):
         if not math.isfinite(args.progress_interval) or args.progress_interval < 0:
             parser.error("--progress-interval must be finite and nonnegative")
         run_computation(args, parser)
+        return
+    if args.command == "whitney" and args.whitney_command == "compute":
+        run_whitney_calculation(args, parser)
         return
     if args.command in ("compare", "migrate"):
         if args.reference_max_mu_size is not None and args.reference_max_mu_size < 1:
@@ -464,6 +581,8 @@ def main(argv=None):
         migrate_checkpoint(data, args.output, args.reference_max_mu_size)
     elif args.command == "plot":
         plot_checkpoint(data, args)
+    elif args.command == "whitney":
+        run_whitney(data, args)
 
 
 def entrypoint():

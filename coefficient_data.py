@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 from dataclasses import dataclass
+from math import factorial, prod
 from pathlib import Path
 from typing import Iterator
 
@@ -41,6 +42,12 @@ def encode_records(records: list[dict]) -> bytes:
     return json.dumps(ordered, separators=(",", ":")).encode("utf-8")
 
 
+def _specht_dimension(partition: PartitionKey) -> int:
+    columns = [sum(row >= column for row in partition) for column in range(1, partition[0] + 1)]
+    hooks = (row - j + columns[j] - i - 1 for i, row in enumerate(partition) for j in range(row))
+    return factorial(sum(partition)) // prod(hooks)
+
+
 @dataclass
 class CoefficientData:
     degree: int
@@ -63,6 +70,35 @@ class CoefficientData:
             for mu, value in sorted(self.coeffs[lam].items()):
                 yield {"lambda": list(lam), "mu": list(mu), "multiplicity": value}
 
+    def validate_dimensions(self) -> int:
+        """Check each column against Specht dimensions and unsigned Stirling numbers."""
+        blocks = {}
+        for part in self.coeffs:
+            blocks.setdefault(sum(part), []).append(part)
+        dimensions = {part: _specht_dimension(part) for part in self.coeffs}
+        stirling = [1] + [0] * self.degree
+        columns, checked = [], 0
+        for degree in range(1, self.degree + 1):
+            for size in range(degree, 0, -1):
+                stirling[size] = stirling[size - 1] + (degree - 1) * stirling[size]
+            stirling[0] = 0
+            block = blocks[degree]
+            columns.extend(block)
+            totals = dict.fromkeys(columns, 0)
+            for lam in block:
+                for mu, value in self.coeffs[lam].items():
+                    totals[mu] += dimensions[lam] * value
+            for mu in columns:
+                expected = dimensions[mu] * stirling[sum(mu)]
+                if totals[mu] != expected:
+                    raise ValueError(
+                        f"Coefficient dimension mismatch at degree {degree}, mu={mu}: "
+                        f"got {totals[mu]}, expected {expected}. "
+                        "Recompute with the corrected algorithm; do not resume this checkpoint."
+                    )
+                checked += 1
+        return checked
+
     def summary(self) -> dict:
         return {
             "degree": self.degree,
@@ -79,6 +115,7 @@ class CoefficientData:
             "reference_status": self.report.get("reference_status", "unknown"),
             "direct_plethysm_pairs_checked": self.report.get("direct_plethysm_pairs_checked"),
             "direct_plethysm_max_mu_size": self.report.get("direct_plethysm_max_mu_size"),
+            "dimension_columns_checked": self.report.get("dimension_columns_checked"),
         }
 
     def export_csv(self, path: Path, *, nonzero: bool = False) -> None:
@@ -176,4 +213,10 @@ def read_checkpoint(directory: Path) -> CoefficientData:
         columns = sum(sum(part) <= max_mu for part in rows)
         if checked != len(rows) * columns:
             raise ValueError("Independent comparison pair count disagrees with its stated scope.")
+    dimension_columns = data.validate_dimensions()
+    if "dimension_columns_checked" in report and (
+        type(report["dimension_columns_checked"]) is not int
+        or report["dimension_columns_checked"] != dimension_columns
+    ):
+        raise ValueError("Checkpoint dimension comparison count disagrees with its data.")
     return data
