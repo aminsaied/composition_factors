@@ -1,26 +1,25 @@
-# Degree-14 computation snapshot
+# Corrected degree-14 checkpoint
 
-This immutable checkpoint contains all positive degrees through 14:
+This is the single current degree-14 dataset. It uses algorithm version 2 and
+replaces the incorrect version-1 snapshot previously stored at this path.
+The older data remains available in Git/LFS history, not a second dataset
+directory. The correction changes **350 coefficients**: 50 lambda partitions
+across seven mu columns of size 8, all in degree 12. Coefficients in degrees
+1 through 11, 13, and 14 match the original.
+All degrees 1 through 14 were freshly computed for this snapshot, without
+resuming a historical checkpoint or reusing its coefficient rows.
+`corrections.json` lists every changed coefficient with its old and new values.
+For example, the coefficient at `lambda=(7,3,2), mu=(5,3)` changes from `66` to
+`65`. The report records the exact number of changes, comparison scope, and hashes.
 
-- 507 partitions and 149,061 stored coefficients, including zeros.
-- 56,557 nonzero coefficients; the implied full matrix has 257,049 entries.
-- Maximum coefficient 51,877, at lambda `[5,3,2,2,1,1]`, mu `[2,1,1]`.
+The original algorithm sorted decomposition parts only by size and length.
+Distinct partitions `(3,1)` and `(2,2)` tie on both, so both orders survived
+deduplication and were assembled twice. The corrected ordering also uses the
+full partition; repeated identical parts retain their factorial correction.
 
-| File | Bytes | Storage |
-| --- | ---: | --- |
-| `coefficients.json` | 8,621,950 | Git LFS |
-| `composition_factors.sobj` | 5,068,860 | Git LFS |
-| `report.json` | 894 | Git |
-| `SHA256SUMS` | 253 | Git |
+## Download and use
 
-The JSON and Sage payloads total 13,690,810 bytes (approximately 13.1 MiB).
-The report and payloads are preserved byte-for-byte from the completed run.
-The report contains no private host paths or credentials.
-
-## Download and verify
-
-Install [Git LFS](https://git-lfs.com/) before these commands. From the repository
-root:
+From a checkout with [Git LFS](https://git-lfs.com/) installed:
 
 ```sh
 git lfs install --local
@@ -30,72 +29,99 @@ python compute.py inspect data/degree14
 python compute.py query data/degree14 --lambda 5,3,2,2,1,1 --mu 2,1,1
 ```
 
-The final command prints `51877`. Inspection and queries use only Python's
-standard library and do not unpickle the Sage file.
+The last command prints `51877`. Inspection, queries, and export need only
+standard Python and exact JSON. For JSON-only access, fetch just
+`data/degree14/coefficients.json`; the full checksum command also requires
+the Sage payload.
 
-For JSON-only access, fetch just `data/degree14/coefficients.json` with the
-`--include` option. The same inspection and query commands work without the
-Sage payload. The full checksum command above requires all three listed files.
+Only `coefficients.json` and `composition_factors.sobj` use LFS. The main report,
+the per-degree reports in `run.json`, the correction list, and checksums are
+ordinary Git files. LFS pointer text is not the payload. Storage and downloads
+count against the repository owner's allowance; CI does not download the data.
 
-LFS pointer files are not the dataset. Use a Git checkout and `git lfs pull`;
-do not assume a source ZIP or a raw pointer file contains the payloads.
-Keep TLS verification enabled. If a custom `GIT_SSL_CAINFO` bundle contains
-only private trust roots, Git LFS can reject GitHub's public certificate even
-when ordinary Git works: it uses that bundle instead of the system roots.
-Select an existing, appropriate trusted CA bundle for the individual command;
-do not disable certificate verification or mistake an `x509` error at
-`locks/verify` for proof that GitHub lacks LFS support.
-
-`SHA256SUMS` hashes physical file bytes, as do the LFS object IDs. The report's
-`coefficient_sha256` instead hashes canonical coefficient JSON without its
-final newline, so those two JSON digests intentionally differ.
-
-Hashes check consistency, not the trustworthiness of rewritten data. The
-`.sobj` file uses pickle and must only be loaded from a trusted source.
-For a fresh Sage checkpoint without reading the published pickle, use the
-JSON-first migration command in the activated Sage environment:
+The `.sobj` file uses pickle and must only be loaded from a trusted source.
+To create a current-source Sage checkpoint without loading the published
+pickle, use the JSON-first migration command in the activated Sage environment:
 
 ```sh
 python compute.py migrate data/degree14 --output results/imported-degree14
 ```
 
-This reads exact JSON, independently compares mu sizes at most 4 by default,
-and creates a new local checkpoint. It does not recompute degree 14.
+Migration validates all dimension identities and compares mu sizes up to 4
+by default. It does not repair or change coefficients. The independently
+verified fresh-computation scope is recorded separately in this snapshot's report.
 
-## Provenance and comparison scope
+## Fresh computation and provenance
 
-The follow-up run completed on 2026-11-03 UTC using SageMath 10.9,
-Python 3.12.16, and NumPy 2.5.4. It resumed a migrated degree-12 result and
-computed degrees 13 and 14. The report's 1,519.2-second timing covers only the
-new degree-14 computation; earlier degrees were reused.
+The fresh run used algorithm version 2 and the pinned Sage 10.9 environment.
+It started at degree 1 with no `--resume` argument and saved a checkpoint after
+each degree through 14. Every checkpoint received a full independent comparison.
 
-The run used a pre-publication working-tree snapshot. Its mathematical source
-is identical to `composition_factors.py` in repository commit
-`349e5c18d50993468bd17a3f8ba1945958f07f18`, with SHA-256:
+The final checkpoint agrees with independent, degree-truncated power-sum
+plethysm on all **257,049 entries** of the implied full matrix, including
+structural zeros. All **1,756 degree/column dimension identities** and Sage
+save/load equality pass. Its **149,061 stored coefficients** also match the
+earlier corrected reconstruction exactly.
+
+| Measurement | Seconds |
+| --- | ---: |
+| Fresh coefficient computation, degrees 1-14 | 1,796.8 |
+| Degree 13 alone | 136.0 |
+| Degree 14 alone | 1,631.6 |
+| Final full-matrix independent comparison | 120.7 |
+| Computation loop, including all comparisons and checkpoint I/O | 2,024.0 |
+
+In this snapshot's `report.json`, `computation_seconds` is the sum of all fresh
+per-degree computation times, not wall time. `degree14_computation_seconds`
+records just the final increment, and `direct_plethysm_seconds` records the
+final full-matrix comparison. `run.json` retains all fourteen original
+per-degree reports, source hashes, and the run's start, completion, and wall
+times. Its hash is linked from `report.json` and included in `SHA256SUMS`.
+Wall time spans the first degree's start message through final completion,
+excluding interpreter startup.
+The original reports describe each incremental step; their reused earlier
+degrees were computed earlier in this same fresh run, not imported from
+historical data.
+
+The report also records the original source/data hashes, the correction count,
+and agreement with the earlier reconstruction. No historical timing or partial
+comparison is relabelled as a fresh result.
+
+The mathematical module used for this run has SHA-256:
 
 ```text
-6a142afb60e3d2f9a5cc3224baecb42560a5d91eeaeb19bd21d664cdd4d9dbde
+a56b9947d9758d58172347a9c18de7ba28af83e9b7d0a0598976e076e92e0da1
 ```
 
-That commit supplies the compatible public implementation and
-`conda-linux-64.lock`; it is not presented as the commit executed by the run.
-The original `runner_sha256` is retained in the report and identifies the
-earlier CLI snapshot, before the final metadata-validation changes.
-
-All 149,061 stored coefficients match the previously saved modernized
-degree-14 result exactly. The canonical coefficient hash is:
+`SHA256SUMS` records physical file hashes. The report's `coefficient_sha256`
+instead hashes canonical coefficient records without their final newline.
+The corrected canonical coefficient hash is:
 
 ```text
-c6f514a80f62e7b54ef38d0f925bc33e2c0df4f778b3b8159609faa59bf59e60
+effb854ea250df454c0fb5d20390825d0457ef5385a0e7dca7c6b000959072e3
 ```
 
-The separate independent plethysm comparison checked 5,577 pairs: all 507
-lambda rows against the 11 mu partitions of sizes 1 through 4. That is a
-partial independent comparison, not a full-matrix check or a proof in arbitrary
-degree. The unavailable original thesis integer table was not compared here.
+Save local computations to a separate output directory. This checked-in
+directory contains the current corrected snapshot; earlier data remains in
+Git/LFS history.
 
-Keep this snapshot unchanged. Save later computations in new directories;
-LFS stores each changed payload as a complete new version. Downloads, including
-CI downloads when enabled, count against the repository owner's bandwidth
-allowance. The ordinary code-checking CI deliberately does not fetch these
-payloads.
+## Reproduce the fresh computation
+
+Use the pinned Sage environment from `conda-linux-64.lock`. From the repository
+root:
+
+```sh
+MPLBACKEND=Agg OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  python compute.py compute --degree 14 --output results/fresh-degree14 \
+    --reference --progress-interval 60
+```
+
+The output directory must not exist. No original data is required. The final
+checkpoint is `results/fresh-degree14/degree14`; its canonical coefficient
+hash should match the value above. Timings and serialized Sage-file bytes need
+not match. Per-degree CLI reports measure individual increments; this snapshot's
+summary aggregates them as described above.
+
+The checkpoint reader rejects the incorrect version-1 snapshot from Git history
+because of its dimension mismatch. Recompute historical runs with algorithm
+version 2; version-1 migration is allowed only through degree 11.

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from importlib.metadata import version
 from pathlib import Path
 
-from coefficient_data import FORMAT_VERSION, encode_records, read_checkpoint
+from coefficient_data import CoefficientData, FORMAT_VERSION, encode_records, read_checkpoint
 
 LEGACY_SOURCE_SHA256 = "3f6234d0539e7bca6fa4548416c6b728bb2807666b27c1b1d924e8ec8dc8241b"
 
@@ -109,8 +109,13 @@ def save_checkpoint(cf, directory, elapsed, source_sha256, reference_pending=Fal
     from composition_factors import ALGORITHM_VERSION, CompositionFactors
 
     directory = Path(directory)
-    directory.mkdir()
     records, encoded = encode_coefficients(cf)
+    rows = {
+        tuple(map(int, lam)): {tuple(map(int, mu)): int(value) for mu, value in row.items()}
+        for lam, row in cf.coeffs.items()
+    }
+    dimension_columns = CoefficientData(int(cf.top_degree), rows, {}).validate_dimensions()
+    directory.mkdir()
     (directory / "coefficients.json").write_bytes(encoded + b"\n")
     cf.save(str(directory / "composition_factors"))
     restored = CompositionFactors.load(str(directory / "composition_factors"))
@@ -140,6 +145,7 @@ def save_checkpoint(cf, directory, elapsed, source_sha256, reference_pending=Fal
         "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "save_load_equal": True,
         "reference_status": "pending" if reference_pending else "not_requested",
+        "dimension_columns_checked": dimension_columns,
         "process_peak_rss_mib": peak_rss_mib(),
     }
     write_report(directory / "report.json", report)
@@ -175,15 +181,18 @@ def compare_direct_plethysm(cf, max_mu_size=None):
             (rho, coefficient) for rho, coefficient in polynomial if sum(rho) <= degree
         )
 
+    power_images = {}
     checked = 0
     for size in range(1, max_mu + 1):
         for mu in Partitions(size):
             polynomial = p.zero()
             for rho, coefficient in p(s(mu)):
-                term = p.one()
-                for k in rho:
-                    term = truncate(term * substitutions[k])
-                polynomial += coefficient * term
+                if rho not in power_images:
+                    term = p.one()
+                    for k in rho:
+                        term = truncate(term * substitutions[k])
+                    power_images[rho] = term
+                polynomial += coefficient * power_images[rho]
             expected = s(polynomial).monomial_coefficients()
             for lam, row in cf.coeffs.items():
                 actual = row.get(mu, 0)
@@ -364,8 +373,13 @@ def migrate_checkpoint(data, output, max_mu_size):
     if algorithm is None:
         if data.report["source_sha256"] != LEGACY_SOURCE_SHA256:
             raise ValueError("Migration requires a recognized legacy source or algorithm version.")
-    elif type(algorithm) is not int or algorithm != ALGORITHM_VERSION:
+    elif type(algorithm) is not int or algorithm not in (1, ALGORITHM_VERSION):
         raise ValueError(f"Unsupported checkpoint algorithm version: {algorithm!r}.")
+    if algorithm in (None, 1) and data.degree >= 12:
+        raise ValueError(
+            "The historical algorithm can overcount from degree 12 onward. "
+            "Recompute from a checkpoint through degree 11 or use corrected data."
+        )
     cf = from_exact_data(data)
     comparison = compare_direct_plethysm(cf, max_mu_size)
     _, encoded = encode_coefficients(cf)

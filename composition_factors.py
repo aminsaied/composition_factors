@@ -64,7 +64,7 @@ from sage.libs.lrcalc.lrcalc import lrcoef as lr
 s = SymmetricFunctions(QQ).schur()
 power = SymmetricFunctions(QQ).power()
 
-ALGORITHM_VERSION = 1
+ALGORITHM_VERSION = 2
 
 
 def _positive_degree(value, name="degree"):
@@ -553,7 +553,7 @@ class MuPartition(object):
         return self._decompositions
 
     def decompositions_for(self, shape):
-        """Compute only this shape, preserving the historical ordering."""
+        """Compute only this shape, canonically ordering each decomposition."""
         shape = _positive_partition(shape)
         if sum(shape) != self.length:
             raise ValueError("The decomposition shape must have the same size as mu.")
@@ -561,7 +561,9 @@ class MuPartition(object):
             decompositions, seen = [], set()
             partitions = [Partitions(size, outer=self.partition) for size in shape]
             for combo in product(*partitions):
-                ordered = tuple(sorted(combo, reverse=True, key=lambda part: (sum(part), len(part))))
+                ordered = tuple(
+                    sorted(combo, reverse=True, key=lambda part: (sum(part), len(part), tuple(part)))
+                )
                 if ordered not in seen:
                     seen.add(ordered)
                     decompositions.append(Decomposition(ordered))

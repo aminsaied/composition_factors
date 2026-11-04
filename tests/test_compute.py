@@ -114,6 +114,9 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(report["direct_plethysm_pairs_checked"], len(cf.coeffs))
         self.assertEqual(report["direct_plethysm_max_mu_size"], 1)
         self.assertEqual(report["reference_status"], "passed")
+        full = compute.compare_direct_plethysm(cf)
+        self.assertEqual(full["direct_plethysm_pairs_checked"], len(cf.coeffs) ** 2)
+        self.assertEqual(full["direct_plethysm_max_mu_size"], 3)
 
     def test_checkpoint_does_not_force_visualization_matrix(self):
         cf = CompositionFactors(3)
@@ -122,7 +125,18 @@ class CheckpointTests(unittest.TestCase):
         self.assertIsNone(cf._matrix)
         self.assertEqual(report["matrix_entry_count"], 36)
         self.assertEqual(report["format_version"], 1)
-        self.assertEqual(report["algorithm_version"], 1)
+        self.assertEqual(report["algorithm_version"], 2)
+        self.assertEqual(report["dimension_columns_checked"], 10)
+
+    def test_checkpoint_rejects_overcount_before_writing_files(self):
+        from sage.all import Partition
+
+        cf = CompositionFactors(3)
+        cf.coeffs[Partition([2, 1])][Partition([1, 1])] += 1
+        directory = self.root / "invalid-dimensions"
+        with self.assertRaisesRegex(ValueError, "dimension"):
+            compute.save_checkpoint(cf, directory, 0.0, self.source_sha256)
+        self.assertFalse(directory.exists())
 
     def test_checkpoint_checks_json_and_pickle_agree(self):
         directory = self.make_checkpoint()
@@ -167,6 +181,29 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(migrated["coefficient_sha256"], report["coefficient_sha256"])
         self.assertEqual(migrated["migration"]["source_sha256"], "a" * 64)
         self.assertEqual(migrated["direct_plethysm_pairs_checked"], 9)
+
+    def test_migration_accepts_version_one_only_below_the_first_affected_degree(self):
+        from coefficient_data import CoefficientData, read_checkpoint
+
+        directory = self.make_checkpoint()
+        path = directory / "report.json"
+        report = json.loads(path.read_text())
+        report["algorithm_version"] = 1
+        path.write_text(json.dumps(report))
+        compute.migrate_checkpoint(read_checkpoint(directory), self.root / "migrated-v1", 2)
+        for algorithm in (None, 1):
+            with self.subTest(algorithm=algorithm):
+                old = CoefficientData(
+                    12,
+                    {},
+                    {
+                        "algorithm_version": algorithm,
+                        "source_sha256": compute.LEGACY_SOURCE_SHA256,
+                    },
+                )
+                with self.assertRaisesRegex(ValueError, "degree 12"):
+                    compute.migrate_checkpoint(old, self.root / "unsafe", 4)
+                self.assertFalse((self.root / "unsafe").exists())
 
     def test_migration_rejects_unknown_algorithms_and_unknown_legacy_sources(self):
         directory = self.make_checkpoint()

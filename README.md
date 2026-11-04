@@ -12,6 +12,13 @@ This file implements:
 
 There is a [white paper](https://arxiv.org/abs/1711.04326) describing this algorithm on the arXiv.
 
+**Historical data correction:** algorithm version 2 fixes duplicate decompositions
+that first affect degree 12. The [checkpoint at `data/degree14`](data/degree14/README.md)
+now contains the corrected replacement. Its predecessor had 350 overcounted
+coefficients in seven degree-12 columns and remains only in Git/LFS history.
+Historical timing and baseline-agreement measurements below do not establish
+mathematical correctness.
+
 ## Installation
 
 This is **SageMath code**, not a standalone NumPy program. It uses Sage's
@@ -114,6 +121,11 @@ view intended for visualisation, not exact large-integer arithmetic. The matrix
 is constructed only when accessed or plotted; saving a result does not force
 its construction.
 
+This low-level pickle loader does not validate checkpoint provenance or repair
+historical coefficients. Use the checked JSON/checkpoint commands below for
+archived results, and replace pre-correction data reaching degree 12 rather than
+reloading it unchanged.
+
 `coeff(lambda_, mu)` accepts nonempty, weakly decreasing partitions of positive
 integers within the computed range. It returns zero when the mu degree exceeds
 the lambda degree, and raises `ValueError` for uncomputed or malformed queries.
@@ -130,7 +142,8 @@ partitions, decompositions, and assembly instructions grows rapidly. No GPU is
 required. Repeated Schur plethysms are cached within each degree's Lie instance;
 complete assemblies are also cached for the duration of one degree. The
 computation and instruction lookup share Lie data. Decompositions are generated
-only for requested shapes, preserving their historical ordering and multiplicity.
+only for requested shapes, with canonical ordering that removes duplicate
+permutations while preserving multiplicities.
 For controlled comparisons or a lower-memory run, the library accepts
 `CompositionFactors(n, cache_assemblies=False)` to disable complete-assembly
 caching while retaining the plethysm cache.
@@ -326,12 +339,17 @@ parts and are CSV-quoted where necessary. `--nonzero` omits zero records.
 All output files/directories must be new. Plotting and comparison load existing
 exact data without recomputing its coefficients or modifying the checkpoint.
 Comparison checks all columns unless a bound is supplied.
+The independent power-sum calculation caches each substituted power-sum
+product across mu partitions, without using the optimized assembly algorithm.
 
-Migration supports the current algorithm version and the recognized
-pre-versioning modernization source
-`3f6234d0539e7bca6fa4548416c6b728bb2807666b27c1b1d924e8ec8dc8241b`.
+Migration supports the current algorithm version. Algorithm-version-1 checkpoints
+and the recognized pre-versioning modernization source
+`3f6234d0539e7bca6fa4548416c6b728bb2807666b27c1b1d924e8ec8dc8241b`
+are accepted only through degree 11, before the first possible overcount.
+Migration does not repair coefficients: historical checkpoints reaching degree
+12 must be replaced with corrected data or recomputed from an earlier checkpoint.
 It verifies the complete stored shape, exact hash, nonnegative integer values,
-and same-degree identity entries; independently compares mu sizes up to 4 by
+same-degree identity entries, and all column dimensions; compares mu sizes up to 4 by
 default; and writes a new checkpoint with the current source hash and original
 provenance. Use `--reference-max-mu-size N` to change that comparison scope.
 The partial comparison is not a proof of all coefficients. Unknown legacy
@@ -340,7 +358,7 @@ files are untouched, and migration reads no pickle.
 
 ### Exact JSON format
 
-New reports declare `format_version: 1` and `algorithm_version: 1`. The former
+New reports declare `format_version: 1` and `algorithm_version: 2`. The former
 versions the file contract; the latter identifies the mathematical algorithm's
 compatibility contract, independently of formatting and plotting changes.
 The source and runner hashes still record the actual implementation bytes.
@@ -360,8 +378,9 @@ identity matrix. The SHA-256 hashes the list sorted lexicographically by
 JSON separators, without the final newline.
 
 `coefficient_data.read_checkpoint(path)` validates this contract, reported
-counts, and the coefficient hash and returns exact Python integers. Historical
-unversioned reports using the same record layout are readable as format 0.
+counts, the coefficient hash, and representation dimensions, and returns exact
+Python integers. Historical unversioned reports using the same record layout
+are readable as format 0 if they satisfy these checks.
 Unknown formats, duplicate/missing entries, malformed values, inconsistent
 counts, hash mismatches, and recorded failed comparisons are rejected. A
 reported successful comparison must include its exact pair count and mu-size
@@ -369,7 +388,30 @@ bound, and these must agree with the validated partition domain. Resumption
 also rejects an incompatible algorithm version even if the source hash matches. Hashes
 detect inconsistency, not maliciously rewritten data or mathematical errors.
 
-### Completed degree-14 run
+For each target degree and mu partition, the reader and checkpoint writer require
+
+$$
+\sum_{\lambda\vdash n} f^\lambda c_{\lambda\mu}
+  = f^\mu \left[{n\atop |\mu|}\right],
+$$
+
+where `f` is the Specht dimension from the hook-length formula and the bracket
+is an unsigned Stirling number of the first kind. Reports record the number of
+degree/column identities in `dimension_columns_checked`. This inexpensive
+necessary condition detects the historical overcount even when hashes agree;
+it is not a substitute for independent coefficient-by-coefficient comparison.
+
+The cause was an incomplete ordering key for decomposition parts. Distinct
+partitions such as `(3,1)` and `(2,2)` tie in both size and length, so both
+orders survived deduplication while assembly already enumerated both assignments.
+The key now also includes the full partition. Repeated identical parts still
+retain their factorial correction, and repeated Lie summands keep their
+multiplicities.
+
+### Historical degree-14 runs (algorithm version 1)
+
+These runs retained the degree-12 overcount. Their timings and exact agreement
+with each other remain historical measurements, not a correctness certificate.
 
 A subsequent two-hour-budget run successfully extended the saved degree-12
 result through degrees 13 and 14 on the same CPU host and environment. The new
@@ -406,12 +448,28 @@ serialization and comparisons. Independent comparisons again passed for
 Those partial independent comparisons are distinct from the complete exact
 agreement with the saved baseline.
 
+### Fresh corrected degree-14 run (algorithm version 2)
+
+A new run computed every degree from 1 through 14 from scratch, without
+resuming historical data. Coefficient computation took **29 minutes 57 seconds**
+in total; degree 14 alone took **27 minutes 12 seconds**. The computation loop,
+including full independent comparisons at every checkpoint and checkpoint I/O,
+took **33 minutes 44 seconds**.
+
+The final independent comparison covered all **257,049 full-matrix entries**,
+not just small mu columns. All **149,061 stored coefficients** matched the
+earlier corrected reconstruction: the differences from the original remain
+exactly **350 coefficients in seven degree-12 columns**.
+The corrected snapshot includes its fresh-run report, all fourteen per-degree
+reports in `run.json`, and the exact old/new correction list.
+
 ### Download the degree-14 checkpoint
 
-The [published checkpoint](data/degree14/README.md) contains exact coefficients
-through degree 14 and the corresponding Sage checkpoint. Only those two
-payload files use Git LFS, totaling approximately **13.1 MiB**. The original
-report, checksums, and provenance documentation remain ordinary Git files.
+The [corrected checkpoint](data/degree14/README.md) contains exact coefficients
+through degree 14 and the corresponding Sage checkpoint. Its two payload files
+use Git LFS. Reports, checksums, the exact correction list, and provenance
+documentation remain ordinary Git files. This is the single current dataset;
+the incorrect predecessor is retained in Git/LFS history, not a second directory.
 
 Install [Git LFS](https://git-lfs.com/) first, then run from a Git checkout:
 
@@ -425,8 +483,8 @@ python compute.py inspect data/degree14
 Inspection needs no Sage and does not load pickle. Without the LFS download,
 the payload paths may contain small pointer files, not computation data.
 See the dataset README for JSON-only access, provenance, and trusted-checkpoint
-usage. This is an immutable snapshot: save new runs elsewhere rather than
-overwriting it.
+usage. Save local experiments to a separate output directory rather than
+overwriting the checked-in snapshot.
 
 CI checks pointer structure without downloading the payloads. LFS storage and
 downloads count against the repository owner's allowance; each changed payload
@@ -445,9 +503,10 @@ MPLBACKEND=Agg python -m unittest discover -s tests
 ```
 
 Additional coverage guards the degree-10 exact hash, cached/uncached assembly
-equivalence, repeated Lie summands, decomposition order, lazy matrices, public
-input boundaries, plot controls, unique trajectories, Sage-free JSON/CLI
-operations, and explicit checkpoint migration.
+equivalence, repeated Lie summands, canonical decomposition order (including
+distinct partitions tied in size and length), dimension identities, lazy
+matrices, public input boundaries, plot controls, unique trajectories,
+Sage-free JSON/CLI operations, and explicit checkpoint migration.
 
 For local linting and formatting:
 
